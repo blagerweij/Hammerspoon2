@@ -128,11 +128,7 @@ struct HSShortcutsIntegrationTests {
             #expect(rejected)
         }
 
-        @Test("open() does not throw for any name")
-        func testOpenDoesNotThrow() {
-            let harness = makeHarness()
-            harness.eval("hs.shortcuts.open('__test_shortcut__')")
-            #expect(!harness.hasException)
-        }
+        // open() isn't called here: it brings up the Shortcuts app, which shows an error dialog for
+        // a name it doesn't know and stays open after the test run.
     }
 }
