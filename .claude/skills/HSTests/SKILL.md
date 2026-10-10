@@ -688,3 +688,25 @@ and record all call arguments so tests can assert on them.
 - [ ] State-mutating tests use `.serialized` and save/restore shared state
 - [ ] Nothing triggers permission dialogs, hardware mutations, or live network calls
 - [ ] **If the module creates child JS objects**: a `testFooDoesNotLeakAfterReload()` test exists that (a) creates AND actively starts the object, (b) tracks it with `WeakLeakTracker`, (c) wraps the harness in an `autoreleasepool {}` block, and (d) calls `tracker.assertNoLeaks()` after the block
+
+---
+
+## Tests that need a real other application
+
+Use the Hammerspoon 2 Test App through `TestAppControl` (`Hammerspoon 2Tests/Helpers/TestApp/`), not Finder, Chess or another app of the user's: it starts in about 0.2 s, shows nothing personal, has English menu titles (`File` > `New Window`) whatever the system language, and its window names the running test.
+
+```swift
+@Suite("hs.foo event tests", .serialized, .enabled(if: TestAppControl.isAvailable, "The test app could not be built"))
+struct HSFooEventTests {
+    @Test("watcher receives windowCreated")
+    func testWindowCreated() async {
+        await TestAppControl.terminateAll()
+        guard let app = await TestAppControl.launch(detail: "Opens a window here and waits for windowCreated") else { return }
+        defer { TestAppControl.running.forEach { $0.terminate() } }
+        // … register the watcher on hs.application.matchingBundleID('net.tenshu.Hammerspoon-2.TestApp') …
+        TestAppControl.openWindow()
+    }
+}
+```
+
+`launch` returns once the app's window is on screen; `app.hide()` / `app.unhide()` work from then on. `build-test-app.sh` in that folder builds the app with `swiftc` on first use; a new command for the app goes into `TestApp.swift` (`handleCommand`) and `TestAppControl`.
