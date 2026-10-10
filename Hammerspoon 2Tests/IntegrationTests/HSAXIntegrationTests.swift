@@ -832,6 +832,9 @@ struct HSAXTests {
     // MARK: - Suite 3: JS helper functions (requires accessibility permissions)
 
     /// Tests for the Swift convenience functions (focusedElement, findByRole, findByTitle, printHierarchy).
+    ///
+    /// The searches run on the Dock: it is always running and its element tree is small (its items,
+    /// one of them titled "Finder"). Searching Finder's whole tree took over a minute per test.
     @Suite("hs.ax convenience function tests", .serialized, .disabled(if: !isAccessibilityEnabled(), "Accessibility permissions not available"))
     struct HSAXJSHelperTests {
 
@@ -849,8 +852,8 @@ struct HSAXTests {
             let harness = makeHarness()
             harness.expectTrue("""
             (function() {
-                var finder = hs.application.matchingBundleID('com.apple.finder');
-                var appElem = hs.ax.applicationElement(finder);
+                var dock = hs.application.matchingBundleID('com.apple.dock');
+                var appElem = hs.ax.applicationElement(dock);
                 return Array.isArray(hs.ax.findByRole('AXWindow', appElem));
             })()
         """)
@@ -861,8 +864,8 @@ struct HSAXTests {
             let harness = makeHarness()
             harness.expectTrue("""
             (function() {
-                var finder = hs.application.matchingBundleID('com.apple.finder');
-                var appElem = hs.ax.applicationElement(finder);
+                var dock = hs.application.matchingBundleID('com.apple.dock');
+                var appElem = hs.ax.applicationElement(dock);
                 var results = hs.ax.findByRole('AXWindow', appElem);
                 return results.every(function(e) { return e.role === 'AXWindow'; });
             })()
@@ -874,21 +877,21 @@ struct HSAXTests {
             let harness = makeHarness()
             harness.expectTrue("""
             (function() {
-                var finder = hs.application.matchingBundleID('com.apple.finder');
-                var appElem = hs.ax.applicationElement(finder);
+                var dock = hs.application.matchingBundleID('com.apple.dock');
+                var appElem = hs.ax.applicationElement(dock);
                 var results = hs.ax.findByRole('AXNonExistentRole12345', appElem);
                 return Array.isArray(results) && results.length === 0;
             })()
         """)
         }
 
-        @Test("findByRole with Finder application element finds the root element itself")
-        func testFindByRoleFinderElementFindsItself() {
+        @Test("findByRole with an application element finds the root element itself")
+        func testFindByRoleApplicationElementFindsItself() {
             let harness = makeHarness()
             harness.expectTrue("""
             (function() {
-                var finder = hs.application.matchingBundleID('com.apple.finder');
-                var appElem = hs.ax.applicationElement(finder);
+                var dock = hs.application.matchingBundleID('com.apple.dock');
+                var appElem = hs.ax.applicationElement(dock);
                 if (!appElem) return false;
                 // findByRole includes the root; AXApplication should be found immediately
                 var results = hs.ax.findByRole('AXApplication', appElem);
@@ -904,8 +907,8 @@ struct HSAXTests {
             let harness = makeHarness()
             harness.expectTrue("""
             (function() {
-                var finder = hs.application.matchingBundleID('com.apple.finder');
-                var appElem = hs.ax.applicationElement(finder);
+                var dock = hs.application.matchingBundleID('com.apple.dock');
+                var appElem = hs.ax.applicationElement(dock);
                 return Array.isArray(hs.ax.findByTitle('Finder', appElem));
             })()
         """)
@@ -916,8 +919,8 @@ struct HSAXTests {
             let harness = makeHarness()
             harness.expectTrue("""
             (function() {
-                var finder = hs.application.matchingBundleID('com.apple.finder');
-                var appElem = hs.ax.applicationElement(finder);
+                var dock = hs.application.matchingBundleID('com.apple.dock');
+                var appElem = hs.ax.applicationElement(dock);
                 var results = hs.ax.findByTitle('zzz_nonexistent_title_zzz_12345', appElem);
                 return Array.isArray(results) && results.length === 0;
             })()
@@ -929,8 +932,8 @@ struct HSAXTests {
             let harness = makeHarness()
             harness.expectTrue("""
             (function() {
-                var finder = hs.application.matchingBundleID('com.apple.finder');
-                var appElem = hs.ax.applicationElement(finder);
+                var dock = hs.application.matchingBundleID('com.apple.dock');
+                var appElem = hs.ax.applicationElement(dock);
                 var results = hs.ax.findByTitle('Finder', appElem);
                 return results.every(function(e) { return e.title && e.title.includes('Finder'); });
             })()
