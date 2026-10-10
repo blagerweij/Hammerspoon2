@@ -13,7 +13,7 @@ private nonisolated func isAccessibilityEnabled() -> Bool {
     return AXIsProcessTrusted()
 }
 
-@Suite("hs.ax tests")
+@Suite("hs.ax tests", .testApp)
 struct HSAXTests {
 
     // MARK: - Suite 1: Module structure (no accessibility permissions required)
@@ -27,6 +27,8 @@ struct HSAXTests {
             let harness = JSTestHarness()
             harness.loadModule(HSAXModule.self, as: "ax")
             harness.loadModule(HSApplicationModule.self, as: "application")
+            harness.eval("var testAppPID = \(TestAppControl.pid ?? -1);")
+            TestAppControl.showCurrentTest()
             return harness
         }
 
@@ -264,15 +266,19 @@ struct HSAXTests {
 
     // MARK: - Suite 2: Element inspection (requires accessibility permissions)
 
-    /// Tests that inspect real AX elements. Uses Finder as the target application
-    /// because it is always running on macOS, including GitHub macOS runners.
-    @Suite("hs.ax element inspection tests", .serialized, .disabled(if: !isAccessibilityEnabled(), "Accessibility permissions not available"))
+    /// Tests that inspect real AX elements. Uses the Hammerspoon 2 Test App (``TestAppControl``)
+    /// as the target application: one copy runs for the whole suite.
+    @Suite("hs.ax element inspection tests", .serialized,
+           .disabled(if: !isAccessibilityEnabled(), "Accessibility permissions not available"),
+           .enabled(if: TestAppControl.isAvailable, "The test app could not be built"))
     struct HSAXElementInspectionTests {
 
         private func makeHarness() -> JSTestHarness {
             let harness = JSTestHarness()
             harness.loadModule(HSAXModule.self, as: "ax")
             harness.loadModule(HSApplicationModule.self, as: "application")
+            harness.eval("var testAppPID = \(TestAppControl.pid ?? -1);")
+            TestAppControl.showCurrentTest()
             return harness
         }
 
@@ -297,42 +303,42 @@ struct HSAXTests {
             #expect(harness.evalTypeOf("hs.ax.systemWideElement().pid") == "number")
         }
 
-        // MARK: - Application element (Finder)
+        // MARK: - Application element
 
-        @Test("applicationElement returns non-null for Finder")
-        func testApplicationElementForFinderNonNull() {
+        @Test("applicationElement returns non-null for the test app")
+        func testApplicationElementNonNull() {
             let harness = makeHarness()
             let result = harness.evalValue("""
             (function() {
-                var finder = hs.application.matchingBundleID('com.apple.finder');
-                return finder ? hs.ax.applicationElement(finder) : null;
+                var app = hs.application.fromPID(testAppPID);
+                return app ? hs.ax.applicationElement(app) : null;
             })()
         """)
             #expect(result?.isObject == true)
         }
 
-        @Test("applicationElement role is AXApplication for Finder")
+        @Test("applicationElement role is AXApplication")
         func testApplicationElementRoleIsAXApplication() {
             let harness = makeHarness()
             harness.expectEqual("""
             (function() {
-                var finder = hs.application.matchingBundleID('com.apple.finder');
-                var elem = hs.ax.applicationElement(finder);
+                var app = hs.application.fromPID(testAppPID);
+                var elem = hs.ax.applicationElement(app);
                 return elem ? elem.role : null;
             })()
         """, "AXApplication")
         }
 
-        @Test("applicationElement title is 'Finder'")
-        func testApplicationElementTitleIsFinder() {
+        @Test("applicationElement title is the application's name")
+        func testApplicationElementTitle() {
             let harness = makeHarness()
             harness.expectEqual("""
             (function() {
-                var finder = hs.application.matchingBundleID('com.apple.finder');
-                var elem = hs.ax.applicationElement(finder);
+                var app = hs.application.fromPID(testAppPID);
+                var elem = hs.ax.applicationElement(app);
                 return elem ? elem.title : null;
             })()
-        """, "Finder")
+        """, "Hammerspoon 2 Test App")
         }
 
         @Test("applicationElement pid matches the running application's pid")
@@ -340,9 +346,9 @@ struct HSAXTests {
             let harness = makeHarness()
             harness.expectTrue("""
             (function() {
-                var finder = hs.application.matchingBundleID('com.apple.finder');
-                var elem = hs.ax.applicationElement(finder);
-                return elem && elem.pid === finder.pid;
+                var app = hs.application.fromPID(testAppPID);
+                var elem = hs.ax.applicationElement(app);
+                return elem && elem.pid === app.pid;
             })()
         """)
         }
@@ -352,8 +358,8 @@ struct HSAXTests {
             let harness = makeHarness()
             harness.expectTrue("""
             (function() {
-                var finder = hs.application.matchingBundleID('com.apple.finder');
-                var elem = hs.ax.applicationElement(finder);
+                var app = hs.application.fromPID(testAppPID);
+                var elem = hs.ax.applicationElement(app);
                 return elem && typeof elem.pid === 'number' && elem.pid > 0;
             })()
         """)
@@ -365,11 +371,11 @@ struct HSAXTests {
         func testSetAttributeValueJSName() {
             let harness = makeHarness()
             harness.eval("""
-            var elem = hs.ax.applicationElement(hs.application.matchingBundleID('com.apple.finder'));
+            var elem = hs.ax.applicationElement(hs.application.fromPID(testAppPID));
             """)
             #expect(harness.evalTypeOf("elem.setAttributeValue") == "function")
             #expect(harness.evalTypeOf("elem.setAttributeValueValue") == "undefined")
-            // An attribute Finder doesn't have, so this changes nothing but still reaches the setter.
+            // An attribute the test app doesn't have, so this changes nothing but still reaches the setter.
             #expect(harness.evalBool("elem.setAttributeValue('AXHammerspoonNonexistent', true)") == false)
             #expect(!harness.hasException)
         }
@@ -381,9 +387,9 @@ struct HSAXTests {
             let harness = makeHarness()
             harness.expectTrue("""
             (function() {
-                var finder = hs.application.matchingBundleID('com.apple.finder');
-                var a = hs.ax.applicationElement(finder);
-                var b = hs.ax.applicationElement(finder);
+                var app = hs.application.fromPID(testAppPID);
+                var a = hs.ax.applicationElement(app);
+                var b = hs.ax.applicationElement(app);
                 return a.isEqualToElement(b);
             })()
         """)
@@ -394,8 +400,8 @@ struct HSAXTests {
             let harness = makeHarness()
             harness.expectFalse("""
             (function() {
-                var finder = hs.application.matchingBundleID('com.apple.finder');
-                var appElem = hs.ax.applicationElement(finder);
+                var app = hs.application.fromPID(testAppPID);
+                var appElem = hs.ax.applicationElement(app);
                 var sysElem = hs.ax.systemWideElement();
                 return appElem.isEqualToElement(sysElem);
             })()
@@ -409,8 +415,8 @@ struct HSAXTests {
             let harness = makeHarness()
             harness.expectTrue("""
             (function() {
-                var finder = hs.application.matchingBundleID('com.apple.finder');
-                var elem = hs.ax.applicationElement(finder);
+                var app = hs.application.fromPID(testAppPID);
+                var elem = hs.ax.applicationElement(app);
                 return elem && typeof elem.isEnabled === 'boolean';
             })()
         """)
@@ -421,8 +427,8 @@ struct HSAXTests {
             let harness = makeHarness()
             harness.expectTrue("""
             (function() {
-                var finder = hs.application.matchingBundleID('com.apple.finder');
-                var elem = hs.ax.applicationElement(finder);
+                var app = hs.application.fromPID(testAppPID);
+                var elem = hs.ax.applicationElement(app);
                 return elem && typeof elem.isFocused === 'boolean';
             })()
         """)
@@ -433,8 +439,8 @@ struct HSAXTests {
             let harness = makeHarness()
             harness.expectTrue("""
             (function() {
-                var finder = hs.application.matchingBundleID('com.apple.finder');
-                var elem = hs.ax.applicationElement(finder);
+                var app = hs.application.fromPID(testAppPID);
+                var elem = hs.ax.applicationElement(app);
                 if (!elem) return false;
                 var s = elem.subrole;
                 return s === null || s === undefined || typeof s === 'string';
@@ -447,8 +453,8 @@ struct HSAXTests {
             let harness = makeHarness()
             harness.expectTrue("""
             (function() {
-                var finder = hs.application.matchingBundleID('com.apple.finder');
-                var elem = hs.ax.applicationElement(finder);
+                var app = hs.application.fromPID(testAppPID);
+                var elem = hs.ax.applicationElement(app);
                 if (!elem) return false;
                 var d = elem.elementDescription;
                 return d === null || d === undefined || typeof d === 'string';
@@ -461,8 +467,8 @@ struct HSAXTests {
             let harness = makeHarness()
             harness.eval("""
             (function() {
-                var finder = hs.application.matchingBundleID('com.apple.finder');
-                var elem = hs.ax.applicationElement(finder);
+                var app = hs.application.fromPID(testAppPID);
+                var elem = hs.ax.applicationElement(app);
                 if (elem) { var _unused = elem.value; }
             })()
         """)
@@ -476,8 +482,8 @@ struct HSAXTests {
             let harness = makeHarness()
             harness.expectTrue("""
             (function() {
-                var finder = hs.application.matchingBundleID('com.apple.finder');
-                var elem = hs.ax.applicationElement(finder);
+                var app = hs.application.fromPID(testAppPID);
+                var elem = hs.ax.applicationElement(app);
                 if (!elem) return false;
                 var p = elem.position;
                 return p === null || p === undefined || typeof p === 'object';
@@ -491,8 +497,8 @@ struct HSAXTests {
             let harness = makeHarness()
             harness.expectTrue("""
             (function() {
-                var finder = hs.application.matchingBundleID('com.apple.finder');
-                var elem = hs.ax.applicationElement(finder);
+                var app = hs.application.fromPID(testAppPID);
+                var elem = hs.ax.applicationElement(app);
                 if (!elem) return false;
                 var s = elem.size;
                 return s === null || s === undefined || typeof s === 'object';
@@ -506,8 +512,8 @@ struct HSAXTests {
             let harness = makeHarness()
             harness.expectTrue("""
             (function() {
-                var finder = hs.application.matchingBundleID('com.apple.finder');
-                var elem = hs.ax.applicationElement(finder);
+                var app = hs.application.fromPID(testAppPID);
+                var elem = hs.ax.applicationElement(app);
                 if (!elem) return false;
                 var f = elem.frame;
                 return f === null || f === undefined || typeof f === 'object';
@@ -516,32 +522,32 @@ struct HSAXTests {
             #expect(!harness.hasException)
         }
 
-        @Test("AXWindow element position is an object when Finder has a window open")
+        @Test("AXWindow element position is an object")
         func testWindowElementPositionIsObject() {
             let harness = makeHarness()
             harness.expectTrue("""
             (function() {
-                var finder = hs.application.matchingBundleID('com.apple.finder');
-                var appElem = hs.ax.applicationElement(finder);
+                var app = hs.application.fromPID(testAppPID);
+                var appElem = hs.ax.applicationElement(app);
                 if (!appElem) return false;
                 var win = appElem.children().find(function(c) { return c.role === 'AXWindow'; });
-                if (!win) return true; // No window open — skip gracefully.
+                if (!win) return false;
                 var p = win.position;
                 return p !== null && p !== undefined && typeof p === 'object';
             })()
         """)
         }
 
-        @Test("AXWindow element size is an object when Finder has a window open")
+        @Test("AXWindow element size is an object")
         func testWindowElementSizeIsObject() {
             let harness = makeHarness()
             harness.expectTrue("""
             (function() {
-                var finder = hs.application.matchingBundleID('com.apple.finder');
-                var appElem = hs.ax.applicationElement(finder);
+                var app = hs.application.fromPID(testAppPID);
+                var appElem = hs.ax.applicationElement(app);
                 if (!appElem) return false;
                 var win = appElem.children().find(function(c) { return c.role === 'AXWindow'; });
-                if (!win) return true; // No window open — skip gracefully.
+                if (!win) return false;
                 var s = win.size;
                 return s !== null && s !== undefined && typeof s === 'object';
             })()
@@ -555,23 +561,23 @@ struct HSAXTests {
             let harness = makeHarness()
             harness.expectTrue("""
             (function() {
-                var finder = hs.application.matchingBundleID('com.apple.finder');
-                var elem = hs.ax.applicationElement(finder);
+                var app = hs.application.fromPID(testAppPID);
+                var elem = hs.ax.applicationElement(app);
                 return elem && Array.isArray(elem.children());
             })()
         """)
         }
 
-        @Test("Finder application element children() length is a non-negative integer")
-        func testFinderChildrenLengthIsNonNegative() {
+        @Test("application element children() is not empty")
+        func testApplicationChildrenNotEmpty() {
             let harness = makeHarness()
             harness.expectTrue("""
             (function() {
-                var finder = hs.application.matchingBundleID('com.apple.finder');
-                var elem = hs.ax.applicationElement(finder);
+                var app = hs.application.fromPID(testAppPID);
+                var elem = hs.ax.applicationElement(app);
                 if (!elem) return false;
-                // Length may be 0 when no Finder windows are open; that is valid.
-                return elem.children().length >= 0;
+                // The test app always has its main window and its menu bar
+                return elem.children().length > 0;
             })()
         """)
         }
@@ -585,8 +591,8 @@ struct HSAXTests {
             let harness = makeHarness()
             harness.expectTrue("""
             (function() {
-                var finder = hs.application.matchingBundleID('com.apple.finder');
-                var appElem = hs.ax.applicationElement(finder);
+                var app = hs.application.fromPID(testAppPID);
+                var appElem = hs.ax.applicationElement(app);
                 if (!appElem) return false;
                 var menuBar = appElem.attributeValue('AXMenuBar');
                 if (!menuBar) return false;
@@ -595,17 +601,16 @@ struct HSAXTests {
         """)
         }
 
-        @Test("AXWindow child has a non-null position when Finder has a window open")
+        @Test("AXWindow child has a non-null position")
         func testWindowChildPositionWhenPresent() {
             let harness = makeHarness()
             harness.expectTrue("""
             (function() {
-                var finder = hs.application.matchingBundleID('com.apple.finder');
-                var appElem = hs.ax.applicationElement(finder);
+                var app = hs.application.fromPID(testAppPID);
+                var appElem = hs.ax.applicationElement(app);
                 if (!appElem) return false;
                 var win = appElem.children().find(function(c) { return c.role === 'AXWindow'; });
-                // Skip gracefully when Finder has no open windows.
-                if (!win) return true;
+                if (!win) return false;
                 return win.position !== null && win.position !== undefined;
             })()
         """)
@@ -616,8 +621,8 @@ struct HSAXTests {
             let harness = makeHarness()
             harness.expectTrue("""
             (function() {
-                var finder = hs.application.matchingBundleID('com.apple.finder');
-                var elem = hs.ax.applicationElement(finder);
+                var app = hs.application.fromPID(testAppPID);
+                var elem = hs.ax.applicationElement(app);
                 if (!elem) return false;
                 var children = elem.children();
                 if (children.length === 0) return true;
@@ -632,8 +637,8 @@ struct HSAXTests {
             let harness = makeHarness()
             let result = harness.evalValue("""
             (function() {
-                var finder = hs.application.matchingBundleID('com.apple.finder');
-                var elem = hs.ax.applicationElement(finder);
+                var app = hs.application.fromPID(testAppPID);
+                var elem = hs.ax.applicationElement(app);
                 return elem ? elem.childAtIndex(-1) : null;
             })()
         """)
@@ -645,8 +650,8 @@ struct HSAXTests {
             let harness = makeHarness()
             let result = harness.evalValue("""
             (function() {
-                var finder = hs.application.matchingBundleID('com.apple.finder');
-                var elem = hs.ax.applicationElement(finder);
+                var app = hs.application.fromPID(testAppPID);
+                var elem = hs.ax.applicationElement(app);
                 return elem ? elem.childAtIndex(9999) : null;
             })()
         """)
@@ -658,8 +663,8 @@ struct HSAXTests {
             let harness = makeHarness()
             harness.expectTrue("""
             (function() {
-                var finder = hs.application.matchingBundleID('com.apple.finder');
-                var appElem = hs.ax.applicationElement(finder);
+                var app = hs.application.fromPID(testAppPID);
+                var appElem = hs.ax.applicationElement(app);
                 if (!appElem) return false;
                 var children = appElem.children();
                 if (children.length === 0) return true;
@@ -674,8 +679,8 @@ struct HSAXTests {
             let harness = makeHarness()
             harness.expectTrue("""
             (function() {
-                var finder = hs.application.matchingBundleID('com.apple.finder');
-                var appElem = hs.ax.applicationElement(finder);
+                var app = hs.application.fromPID(testAppPID);
+                var appElem = hs.ax.applicationElement(app);
                 if (!appElem) return false;
                 var children = appElem.children();
                 if (children.length === 0) return true;
@@ -692,8 +697,8 @@ struct HSAXTests {
             let harness = makeHarness()
             harness.expectTrue("""
             (function() {
-                var finder = hs.application.matchingBundleID('com.apple.finder');
-                var elem = hs.ax.applicationElement(finder);
+                var app = hs.application.fromPID(testAppPID);
+                var elem = hs.ax.applicationElement(app);
                 if (!elem) return false;
                 var names = elem.attributeNames();
                 return Array.isArray(names) && names.length > 0;
@@ -706,8 +711,8 @@ struct HSAXTests {
             let harness = makeHarness()
             harness.expectTrue("""
             (function() {
-                var finder = hs.application.matchingBundleID('com.apple.finder');
-                var elem = hs.ax.applicationElement(finder);
+                var app = hs.application.fromPID(testAppPID);
+                var elem = hs.ax.applicationElement(app);
                 if (!elem) return false;
                 return elem.attributeNames().indexOf('AXRole') !== -1;
             })()
@@ -719,8 +724,8 @@ struct HSAXTests {
             let harness = makeHarness()
             harness.expectTrue("""
             (function() {
-                var finder = hs.application.matchingBundleID('com.apple.finder');
-                var elem = hs.ax.applicationElement(finder);
+                var app = hs.application.fromPID(testAppPID);
+                var elem = hs.ax.applicationElement(app);
                 if (!elem) return false;
                 return elem.attributeNames().indexOf('AXChildren') !== -1;
             })()
@@ -732,8 +737,8 @@ struct HSAXTests {
             let harness = makeHarness()
             harness.expectTrue("""
             (function() {
-                var finder = hs.application.matchingBundleID('com.apple.finder');
-                var elem = hs.ax.applicationElement(finder);
+                var app = hs.application.fromPID(testAppPID);
+                var elem = hs.ax.applicationElement(app);
                 if (!elem) return false;
                 return elem.attributeValue('AXRole') === elem.role;
             })()
@@ -751,8 +756,8 @@ struct HSAXTests {
             let harness = makeHarness()
             harness.expectTrue("""
             (function() {
-                var finder = hs.application.matchingBundleID('com.apple.finder');
-                var appElem = hs.ax.applicationElement(finder);
+                var app = hs.application.fromPID(testAppPID);
+                var appElem = hs.ax.applicationElement(app);
                 if (!appElem) return false;
                 var kids = appElem.attributeValue('AXChildren');
                 if (!Array.isArray(kids) || kids.length === 0) return false;
@@ -768,8 +773,8 @@ struct HSAXTests {
             let harness = makeHarness()
             harness.expectTrue("""
             (function() {
-                var finder = hs.application.matchingBundleID('com.apple.finder');
-                var elem = hs.ax.applicationElement(finder);
+                var app = hs.application.fromPID(testAppPID);
+                var elem = hs.ax.applicationElement(app);
                 if (!elem) return false;
                 var v = elem.attributeValue('AXNonExistentAttribute12345');
                 return v === null || v === undefined;
@@ -782,8 +787,8 @@ struct HSAXTests {
             let harness = makeHarness()
             harness.expectFalse("""
             (function() {
-                var finder = hs.application.matchingBundleID('com.apple.finder');
-                var elem = hs.ax.applicationElement(finder);
+                var app = hs.application.fromPID(testAppPID);
+                var elem = hs.ax.applicationElement(app);
                 return elem ? elem.isAttributeSettable('AXRole') : false;
             })()
         """)
@@ -794,8 +799,8 @@ struct HSAXTests {
             let harness = makeHarness()
             harness.expectTrue("""
             (function() {
-                var finder = hs.application.matchingBundleID('com.apple.finder');
-                var elem = hs.ax.applicationElement(finder);
+                var app = hs.application.fromPID(testAppPID);
+                var elem = hs.ax.applicationElement(app);
                 if (!elem) return false;
                 return typeof elem.isAttributeSettable('AXRole') === 'boolean';
             })()
@@ -809,8 +814,8 @@ struct HSAXTests {
             let harness = makeHarness()
             harness.expectTrue("""
             (function() {
-                var finder = hs.application.matchingBundleID('com.apple.finder');
-                var elem = hs.ax.applicationElement(finder);
+                var app = hs.application.fromPID(testAppPID);
+                var elem = hs.ax.applicationElement(app);
                 return elem && Array.isArray(elem.actionNames());
             })()
         """)
@@ -821,8 +826,8 @@ struct HSAXTests {
             let harness = makeHarness()
             harness.expectFalse("""
             (function() {
-                var finder = hs.application.matchingBundleID('com.apple.finder');
-                var elem = hs.ax.applicationElement(finder);
+                var app = hs.application.fromPID(testAppPID);
+                var elem = hs.ax.applicationElement(app);
                 return elem ? elem.performAction('AXNonExistentAction12345') : false;
             })()
         """)
@@ -833,15 +838,19 @@ struct HSAXTests {
 
     /// Tests for the Swift convenience functions (focusedElement, findByRole, findByTitle, printHierarchy).
     ///
-    /// The searches run on the Dock: it is always running and its element tree is small (its items,
-    /// one of them titled "Finder"). Searching Finder's whole tree took over a minute per test.
-    @Suite("hs.ax convenience function tests", .serialized, .disabled(if: !isAccessibilityEnabled(), "Accessibility permissions not available"))
+    /// The searches run on the test app: its element tree is small, and it has a window and a menu
+    /// item titled "New Window". Searching Finder's whole tree took over a minute per test.
+    @Suite("hs.ax convenience function tests", .serialized,
+           .disabled(if: !isAccessibilityEnabled(), "Accessibility permissions not available"),
+           .enabled(if: TestAppControl.isAvailable, "The test app could not be built"))
     struct HSAXJSHelperTests {
 
         private func makeHarness() -> JSTestHarness {
             let harness = JSTestHarness()
             harness.loadModule(HSAXModule.self, as: "ax")
             harness.loadModule(HSApplicationModule.self, as: "application")
+            harness.eval("var testAppPID = \(TestAppControl.pid ?? -1);")
+            TestAppControl.showCurrentTest()
             return harness
         }
 
@@ -852,8 +861,8 @@ struct HSAXTests {
             let harness = makeHarness()
             harness.expectTrue("""
             (function() {
-                var dock = hs.application.matchingBundleID('com.apple.dock');
-                var appElem = hs.ax.applicationElement(dock);
+                var app = hs.application.fromPID(testAppPID);
+                var appElem = hs.ax.applicationElement(app);
                 return Array.isArray(hs.ax.findByRole('AXWindow', appElem));
             })()
         """)
@@ -864,10 +873,10 @@ struct HSAXTests {
             let harness = makeHarness()
             harness.expectTrue("""
             (function() {
-                var dock = hs.application.matchingBundleID('com.apple.dock');
-                var appElem = hs.ax.applicationElement(dock);
+                var app = hs.application.fromPID(testAppPID);
+                var appElem = hs.ax.applicationElement(app);
                 var results = hs.ax.findByRole('AXWindow', appElem);
-                return results.every(function(e) { return e.role === 'AXWindow'; });
+                return results.length > 0 && results.every(function(e) { return e.role === 'AXWindow'; });
             })()
         """)
         }
@@ -877,8 +886,8 @@ struct HSAXTests {
             let harness = makeHarness()
             harness.expectTrue("""
             (function() {
-                var dock = hs.application.matchingBundleID('com.apple.dock');
-                var appElem = hs.ax.applicationElement(dock);
+                var app = hs.application.fromPID(testAppPID);
+                var appElem = hs.ax.applicationElement(app);
                 var results = hs.ax.findByRole('AXNonExistentRole12345', appElem);
                 return Array.isArray(results) && results.length === 0;
             })()
@@ -890,8 +899,8 @@ struct HSAXTests {
             let harness = makeHarness()
             harness.expectTrue("""
             (function() {
-                var dock = hs.application.matchingBundleID('com.apple.dock');
-                var appElem = hs.ax.applicationElement(dock);
+                var app = hs.application.fromPID(testAppPID);
+                var appElem = hs.ax.applicationElement(app);
                 if (!appElem) return false;
                 // findByRole includes the root; AXApplication should be found immediately
                 var results = hs.ax.findByRole('AXApplication', appElem);
@@ -907,9 +916,9 @@ struct HSAXTests {
             let harness = makeHarness()
             harness.expectTrue("""
             (function() {
-                var dock = hs.application.matchingBundleID('com.apple.dock');
-                var appElem = hs.ax.applicationElement(dock);
-                return Array.isArray(hs.ax.findByTitle('Finder', appElem));
+                var app = hs.application.fromPID(testAppPID);
+                var appElem = hs.ax.applicationElement(app);
+                return Array.isArray(hs.ax.findByTitle('New Window', appElem));
             })()
         """)
         }
@@ -919,8 +928,8 @@ struct HSAXTests {
             let harness = makeHarness()
             harness.expectTrue("""
             (function() {
-                var dock = hs.application.matchingBundleID('com.apple.dock');
-                var appElem = hs.ax.applicationElement(dock);
+                var app = hs.application.fromPID(testAppPID);
+                var appElem = hs.ax.applicationElement(app);
                 var results = hs.ax.findByTitle('zzz_nonexistent_title_zzz_12345', appElem);
                 return Array.isArray(results) && results.length === 0;
             })()
@@ -932,10 +941,10 @@ struct HSAXTests {
             let harness = makeHarness()
             harness.expectTrue("""
             (function() {
-                var dock = hs.application.matchingBundleID('com.apple.dock');
-                var appElem = hs.ax.applicationElement(dock);
-                var results = hs.ax.findByTitle('Finder', appElem);
-                return results.every(function(e) { return e.title && e.title.includes('Finder'); });
+                var app = hs.application.fromPID(testAppPID);
+                var appElem = hs.ax.applicationElement(app);
+                var results = hs.ax.findByTitle('New Window', appElem);
+                return results.length > 0 && results.every(function(e) { return e.title && e.title.includes('New Window'); });
             })()
         """)
         }
@@ -967,8 +976,8 @@ struct HSAXTests {
             let harness = makeHarness()
             harness.eval("""
             (function() {
-                var finder = hs.application.matchingBundleID('com.apple.finder');
-                var appElem = hs.ax.applicationElement(finder);
+                var app = hs.application.fromPID(testAppPID);
+                var appElem = hs.ax.applicationElement(app);
                 if (appElem) { hs.ax.printHierarchy(appElem); }
             })()
         """)
@@ -987,8 +996,8 @@ struct HSAXTests {
             let harness = makeHarness()
             harness.eval("""
             (function() {
-                var finder = hs.application.matchingBundleID('com.apple.finder');
-                var appElem = hs.ax.applicationElement(finder);
+                var app = hs.application.fromPID(testAppPID);
+                var appElem = hs.ax.applicationElement(app);
                 if (appElem) { hs.ax.printHierarchy(appElem, 2); }
             })()
         """)
@@ -1177,13 +1186,17 @@ struct HSAXTests {
 
     /// Tests that verify the add/remove watcher API is correct and safe, without
     /// requiring actual AX notifications to fire.
-    @Suite("hs.ax watcher lifecycle tests", .serialized, .disabled(if: !isAccessibilityEnabled(), "Accessibility permissions not available"))
+    @Suite("hs.ax watcher lifecycle tests", .serialized,
+           .disabled(if: !isAccessibilityEnabled(), "Accessibility permissions not available"),
+           .enabled(if: TestAppControl.isAvailable, "The test app could not be built"))
     struct HSAXWatcherLifecycleTests {
 
         private func makeHarness() -> JSTestHarness {
             let harness = JSTestHarness()
             harness.loadModule(HSAXModule.self, as: "ax")
             harness.loadModule(HSApplicationModule.self, as: "application")
+            harness.eval("var testAppPID = \(TestAppControl.pid ?? -1);")
+            TestAppControl.showCurrentTest()
             return harness
         }
 
@@ -1191,8 +1204,8 @@ struct HSAXTests {
         func testAddRemoveCycleIsSafe() {
             let harness = makeHarness()
             harness.eval("""
-            var _lc1Finder = hs.application.matchingBundleID('com.apple.finder');
-            var _lc1Elem = hs.ax.applicationElement(_lc1Finder);
+            var _lc1App = hs.application.fromPID(testAppPID);
+            var _lc1Elem = hs.ax.applicationElement(_lc1App);
             var _lc1Fn = function(notification, elem) {};
             hs.ax.on(_lc1Elem, 'AXWindowCreated', _lc1Fn);
             hs.ax.off(_lc1Elem, 'AXWindowCreated', _lc1Fn);
@@ -1204,8 +1217,8 @@ struct HSAXTests {
         func testRemoveUnregisteredListenerIsSafe() {
             let harness = makeHarness()
             harness.eval("""
-            var _lc2Finder = hs.application.matchingBundleID('com.apple.finder');
-            var _lc2Elem = hs.ax.applicationElement(_lc2Finder);
+            var _lc2App = hs.application.fromPID(testAppPID);
+            var _lc2Elem = hs.ax.applicationElement(_lc2App);
             hs.ax.off(_lc2Elem, 'AXWindowCreated', function() {});
         """)
             #expect(!harness.hasException)
@@ -1215,8 +1228,8 @@ struct HSAXTests {
         func testAddSameListenerTwiceIsIdempotent() {
             let harness = makeHarness()
             harness.eval("""
-            var _lc3Finder = hs.application.matchingBundleID('com.apple.finder');
-            var _lc3Elem = hs.ax.applicationElement(_lc3Finder);
+            var _lc3App = hs.application.fromPID(testAppPID);
+            var _lc3Elem = hs.ax.applicationElement(_lc3App);
             var _lc3Fn = function(notification, elem) {};
             hs.ax.on(_lc3Elem, 'AXWindowCreated', _lc3Fn);
             hs.ax.on(_lc3Elem, 'AXWindowCreated', _lc3Fn);
@@ -1229,8 +1242,8 @@ struct HSAXTests {
         func testMultipleDistinctListenersLifecycle() {
             let harness = makeHarness()
             harness.eval("""
-            var _lc4Finder = hs.application.matchingBundleID('com.apple.finder');
-            var _lc4Elem = hs.ax.applicationElement(_lc4Finder);
+            var _lc4App = hs.application.fromPID(testAppPID);
+            var _lc4Elem = hs.ax.applicationElement(_lc4App);
             var _lc4Fn1 = function(n, e) {};
             var _lc4Fn2 = function(n, e) {};
             var _lc4Fn3 = function(n, e) {};
@@ -1248,8 +1261,8 @@ struct HSAXTests {
         func testMultipleNotificationsOnSameApp() {
             let harness = makeHarness()
             harness.eval("""
-            var _lc5Finder = hs.application.matchingBundleID('com.apple.finder');
-            var _lc5Elem = hs.ax.applicationElement(_lc5Finder);
+            var _lc5App = hs.application.fromPID(testAppPID);
+            var _lc5Elem = hs.ax.applicationElement(_lc5App);
             var _lc5Fn1 = function(n, e) {};
             var _lc5Fn2 = function(n, e) {};
             hs.ax.on(_lc5Elem, 'AXWindowCreated', _lc5Fn1);
@@ -1264,8 +1277,8 @@ struct HSAXTests {
         func testAddWatcherAcceptsArrayOfNotifications() {
             let harness = makeHarness()
             harness.eval("""
-            var _lc10Finder = hs.application.matchingBundleID('com.apple.finder');
-            var _lc10Elem = hs.ax.applicationElement(_lc10Finder);
+            var _lc10App = hs.application.fromPID(testAppPID);
+            var _lc10Elem = hs.ax.applicationElement(_lc10App);
             var _lc10Fn = function(n, e) {};
             hs.ax.on(_lc10Elem, ['AXWindowCreated', 'AXWindowMiniaturized', 'AXWindowMoved'], _lc10Fn);
             hs.ax.off(_lc10Elem, ['AXWindowCreated', 'AXWindowMiniaturized', 'AXWindowMoved'], _lc10Fn);
@@ -1277,8 +1290,8 @@ struct HSAXTests {
         func testAddWatcherArrayRegistersEachNotificationIndependently() {
             let harness = makeHarness()
             harness.eval("""
-            var _lc11Finder = hs.application.matchingBundleID('com.apple.finder');
-            var _lc11Elem = hs.ax.applicationElement(_lc11Finder);
+            var _lc11App = hs.application.fromPID(testAppPID);
+            var _lc11Elem = hs.ax.applicationElement(_lc11App);
             var _lc11Fn = function(n, e) {};
             hs.ax.on(_lc11Elem, ['AXWindowCreated', 'AXWindowMiniaturized'], _lc11Fn);
             // Removing just one of the two notifications should leave the other registered
@@ -1327,8 +1340,8 @@ struct HSAXTests {
         func testAddWatcherThrowsForStringListener() {
             let harness = makeHarness()
             harness.eval("""
-            var _lc6Finder = hs.application.matchingBundleID('com.apple.finder');
-            var _lc6Elem = hs.ax.applicationElement(_lc6Finder);
+            var _lc6App = hs.application.fromPID(testAppPID);
+            var _lc6Elem = hs.ax.applicationElement(_lc6App);
             hs.ax.on(_lc6Elem, 'AXWindowCreated', 'not a function');
         """)
             #expect(harness.hasException)
@@ -1338,8 +1351,8 @@ struct HSAXTests {
         func testAddWatcherThrowsForNumberListener() {
             let harness = makeHarness()
             harness.eval("""
-            var _lc7Finder = hs.application.matchingBundleID('com.apple.finder');
-            var _lc7Elem = hs.ax.applicationElement(_lc7Finder);
+            var _lc7App = hs.application.fromPID(testAppPID);
+            var _lc7Elem = hs.ax.applicationElement(_lc7App);
             hs.ax.on(_lc7Elem, 'AXWindowCreated', 42);
         """)
             #expect(harness.hasException)
@@ -1349,8 +1362,8 @@ struct HSAXTests {
         func testAddWatcherThrowsForNullListener() {
             let harness = makeHarness()
             harness.eval("""
-            var _lc8Finder = hs.application.matchingBundleID('com.apple.finder');
-            var _lc8Elem = hs.ax.applicationElement(_lc8Finder);
+            var _lc8App = hs.application.fromPID(testAppPID);
+            var _lc8Elem = hs.ax.applicationElement(_lc8App);
             hs.ax.on(_lc8Elem, 'AXWindowCreated', null);
         """)
             #expect(harness.hasException)
@@ -1367,8 +1380,8 @@ struct HSAXTests {
             // never reached this try/catch at all.
             let harness = makeHarness()
             harness.eval("""
-            var _catchFinder = hs.application.matchingBundleID('com.apple.finder');
-            var _catchElem = hs.ax.applicationElement(_catchFinder);
+            var _catchApp = hs.application.fromPID(testAppPID);
+            var _catchElem = hs.ax.applicationElement(_catchApp);
             var threw = false;
             try {
                 hs.ax.on(_catchElem, 'AXWindowCreated', 'not a function');
@@ -1383,8 +1396,8 @@ struct HSAXTests {
         func testRemovingOneListenerLeavesOtherIntact() {
             let harness = makeHarness()
             harness.eval("""
-            var _lc9Finder = hs.application.matchingBundleID('com.apple.finder');
-            var _lc9Elem = hs.ax.applicationElement(_lc9Finder);
+            var _lc9App = hs.application.fromPID(testAppPID);
+            var _lc9Elem = hs.ax.applicationElement(_lc9App);
             var _lc9Fn1 = function(n, e) {};
             var _lc9Fn2 = function(n, e) {};
             hs.ax.on(_lc9Elem, 'AXWindowCreated', _lc9Fn1);
@@ -1399,8 +1412,8 @@ struct HSAXTests {
         func testWatcherOnDescendantElement() {
             let harness = makeHarness()
             harness.eval("""
-            var _lc10Finder = hs.application.matchingBundleID('com.apple.finder');
-            var _lc10AppElem = hs.ax.applicationElement(_lc10Finder);
+            var _lc10App = hs.application.fromPID(testAppPID);
+            var _lc10AppElem = hs.ax.applicationElement(_lc10App);
             var _lc10MenuBar = _lc10AppElem.attributeValue('AXMenuBar');
             var _lc10Fn = function(notification, elem) {};
             hs.ax.on(_lc10MenuBar, 'AXValueChanged', _lc10Fn);
@@ -1413,8 +1426,8 @@ struct HSAXTests {
         func testWatchersOnDifferentElementsCoexist() {
             let harness = makeHarness()
             harness.eval("""
-            var _lc11Finder = hs.application.matchingBundleID('com.apple.finder');
-            var _lc11AppElem = hs.ax.applicationElement(_lc11Finder);
+            var _lc11App = hs.application.fromPID(testAppPID);
+            var _lc11AppElem = hs.ax.applicationElement(_lc11App);
             var _lc11MenuBar = _lc11AppElem.attributeValue('AXMenuBar');
             var _lc11Fn1 = function(n, e) {};
             var _lc11Fn2 = function(n, e) {};
@@ -1439,23 +1452,27 @@ struct HSAXTests {
     /// registration never fires here), so a test that waited for one would be vacuous. Calling
     /// the routing function directly exercises the exact logic that used to silently drop
     /// application-scoped notifications, without depending on OS notification delivery.
-    @Suite("hs.ax watcher routing tests", .serialized, .disabled(if: !isAccessibilityEnabled(), "Accessibility permissions not available"))
+    @Suite("hs.ax watcher routing tests", .serialized,
+           .disabled(if: !isAccessibilityEnabled(), "Accessibility permissions not available"),
+           .enabled(if: TestAppControl.isAvailable, "The test app could not be built"))
     struct HSAXWatcherRoutingTests {
 
         private func makeHarness() -> JSTestHarness {
             let harness = JSTestHarness()
             harness.loadModule(HSAXModule.self, as: "ax")
             harness.loadModule(HSApplicationModule.self, as: "application")
+            harness.eval("var testAppPID = \(TestAppControl.pid ?? -1);")
+            TestAppControl.showCurrentTest()
             return harness
         }
 
-        /// Fetches the two menu bar items of frontmost-matched Finder, along with the app
+        /// Fetches the two menu bar items of the test app, along with the app
         /// element itself and the live HSAXModule instance, for use in routing tests.
         @MainActor
         private func makeFixture(_ harness: JSTestHarness) -> (module: HSAXModule, appElement: UIElement, itemA: UIElement, itemB: UIElement)? {
             harness.eval("""
-            var _rtFinder = hs.application.matchingBundleID('com.apple.finder');
-            var _rtAppElem = hs.ax.applicationElement(_rtFinder);
+            var _rtApp = hs.application.fromPID(testAppPID);
+            var _rtAppElem = hs.ax.applicationElement(_rtApp);
             var _rtMenuBar = _rtAppElem.attributeValue('AXMenuBar');
             var _rtMenuItems = _rtMenuBar.children();
             globalThis._rtAppElem = _rtAppElem;
@@ -1481,7 +1498,7 @@ struct HSAXTests {
         func testDescendantNotificationRoutesToApplicationWatcher() {
             let harness = makeHarness()
             guard let fixture = makeFixture(harness) else {
-                Issue.record("Could not set up Finder AX fixture")
+                Issue.record("Could not set up the test app AX fixture")
                 return
             }
 
@@ -1507,7 +1524,7 @@ struct HSAXTests {
         func testDescendantWatcherStaysScopedToItsOwnElement() {
             let harness = makeHarness()
             guard let fixture = makeFixture(harness) else {
-                Issue.record("Could not set up Finder AX fixture")
+                Issue.record("Could not set up the test app AX fixture")
                 return
             }
 
@@ -1534,7 +1551,7 @@ struct HSAXTests {
         func testApplicationAndDescendantWatchersCoexistAndBothFire() {
             let harness = makeHarness()
             guard let fixture = makeFixture(harness) else {
-                Issue.record("Could not set up Finder AX fixture")
+                Issue.record("Could not set up the test app AX fixture")
                 return
             }
 
@@ -1727,19 +1744,18 @@ struct HSAXTests {
             let harness = JSTestHarness()
             harness.loadModule(HSAXModule.self, as: "ax")
             harness.loadModule(HSApplicationModule.self, as: "application")
+            harness.eval("var testAppPID = \(TestAppControl.pid ?? -1);")
+            TestAppControl.showCurrentTest()
             return harness
         }
 
         @Test("watcher receives 'windowCreated' when the test app opens a window")
         func testWatcherReceivesWindowCreated() async {
-            await TestAppControl.terminateAll()
-            guard await TestAppControl.launch(detail: "Opens a window here and waits for windowCreated") != nil else { return }
-            defer { TestAppControl.running.forEach { $0.terminate() } }
-
+            defer { TestAppControl.closeWindows() }
             let harness = makeHarness()
 
             harness.eval("""
-            var _ed1App = hs.application.matchingBundleID('net.tenshu.Hammerspoon-2.TestApp');
+            var _ed1App = hs.application.fromPID(testAppPID);
             var _ed1Elem = hs.ax.applicationElement(_ed1App);
             var _ed1Events = [];
             var _ed1Fn = function(notification, elem) { _ed1Events.push(notification); };
@@ -1761,14 +1777,11 @@ struct HSAXTests {
 
         @Test("multiple listeners all receive the same windowCreated notification")
         func testMultipleListenersAllReceiveEvent() async {
-            await TestAppControl.terminateAll()
-            guard await TestAppControl.launch(detail: "Opens a window here; both windowCreated listeners must fire") != nil else { return }
-            defer { TestAppControl.running.forEach { $0.terminate() } }
-
+            defer { TestAppControl.closeWindows() }
             let harness = makeHarness()
 
             harness.eval("""
-            var _ed2App = hs.application.matchingBundleID('net.tenshu.Hammerspoon-2.TestApp');
+            var _ed2App = hs.application.fromPID(testAppPID);
             var _ed2Elem = hs.ax.applicationElement(_ed2App);
             var _ed2Count1 = 0, _ed2Count2 = 0;
             var _ed2Fn1 = function(n, e) { if (n === 'windowCreated') _ed2Count1++; };
@@ -1798,14 +1811,11 @@ struct HSAXTests {
 
         @Test("a removed listener does not receive subsequent events")
         func testRemovedListenerDoesNotReceiveEvents() async {
-            await TestAppControl.terminateAll()
-            guard await TestAppControl.launch(detail: "Opens a window here; the removed listener must stay silent") != nil else { return }
-            defer { TestAppControl.running.forEach { $0.terminate() } }
-
+            defer { TestAppControl.closeWindows() }
             let harness = makeHarness()
 
             harness.eval("""
-            var _ed3App = hs.application.matchingBundleID('net.tenshu.Hammerspoon-2.TestApp');
+            var _ed3App = hs.application.fromPID(testAppPID);
             var _ed3Elem = hs.ax.applicationElement(_ed3App);
             var _ed3RemovedCount = 0, _ed3KeptCount = 0;
             var _ed3RemovedFn = function(n, e) { _ed3RemovedCount++; };
@@ -1831,14 +1841,11 @@ struct HSAXTests {
 
         @Test("watcher callback receives the camelCase notification name and an element object")
         func testWatcherCallbackReceivesCorrectArguments() async {
-            await TestAppControl.terminateAll()
-            guard await TestAppControl.launch(detail: "Opens a window here; the callback must get the camelCase name and an element") != nil else { return }
-            defer { TestAppControl.running.forEach { $0.terminate() } }
-
+            defer { TestAppControl.closeWindows() }
             let harness = makeHarness()
 
             harness.eval("""
-            var _ed4App = hs.application.matchingBundleID('net.tenshu.Hammerspoon-2.TestApp');
+            var _ed4App = hs.application.fromPID(testAppPID);
             var _ed4TargetElem = hs.ax.applicationElement(_ed4App);
             var _ed4Notif = null, _ed4Elem = null;
             var _ed4Fn = function(notification, element) {
@@ -1865,14 +1872,11 @@ struct HSAXTests {
 
         @Test("watcher callback element has a valid role string")
         func testWatcherCallbackElementHasRole() async {
-            await TestAppControl.terminateAll()
-            guard await TestAppControl.launch(detail: "Opens a window here; the element passed to the callback must have a role") != nil else { return }
-            defer { TestAppControl.running.forEach { $0.terminate() } }
-
+            defer { TestAppControl.closeWindows() }
             let harness = makeHarness()
 
             harness.eval("""
-            var _ed5App = hs.application.matchingBundleID('net.tenshu.Hammerspoon-2.TestApp');
+            var _ed5App = hs.application.fromPID(testAppPID);
             var _ed5Elem = hs.ax.applicationElement(_ed5App);
             var _ed5Role = null;
             var _ed5Fn = function(notification, element) {
@@ -1896,14 +1900,11 @@ struct HSAXTests {
 
         @Test("watcher registered with an array of notifications receives events for them")
         func testWatcherWithArrayOfNotificationsReceivesEvents() async {
-            await TestAppControl.terminateAll()
-            guard await TestAppControl.launch(detail: "Opens a window here; a watcher for an array of notifications must fire") != nil else { return }
-            defer { TestAppControl.running.forEach { $0.terminate() } }
-
+            defer { TestAppControl.closeWindows() }
             let harness = makeHarness()
 
             harness.eval("""
-            var _ed6App = hs.application.matchingBundleID('net.tenshu.Hammerspoon-2.TestApp');
+            var _ed6App = hs.application.fromPID(testAppPID);
             var _ed6Elem = hs.ax.applicationElement(_ed6App);
             var _ed6Events = [];
             var _ed6Fn = function(notification, elem) { _ed6Events.push(notification); };
