@@ -383,28 +383,26 @@ struct HSApplicationTests {
     @Suite(
         "hs.application menu traversal tests", .serialized,
         .disabled(if: !AXIsProcessTrusted(), "Accessibility permission not granted"),
-        .enabled(if: TestAppControl.isAvailable, "The test app could not be built")
+        .enabled(if: TestAppControl.isAvailable, "The test app could not be built"), .testApp
     )
     struct HSApplicationMenuTraversalTests {
 
         private func makeHarness() -> JSTestHarness {
             let harness = JSTestHarness()
             harness.loadModule(HSApplicationModule.self, as: "application")
+            harness.eval("var testAppPID = \(TestAppControl.pid ?? -1);")
+            TestAppControl.showCurrentTest()
             return harness
         }
 
         @Test("getMenuItems returns a non-empty menu tree")
-        func testGetMenuItemsReturnsNonEmptyTree() async {
-            await TestAppControl.terminateAll()
-            guard await TestAppControl.launch(detail: "Reads this app's menu bar; it must contain File") != nil else { return }
-            defer { TestAppControl.running.forEach { $0.terminate() } }
-
+        func testGetMenuItemsReturnsNonEmptyTree() {
             // Regression test: getMenuItems previously used a whole-array `as?` cast
             // (`menuBar.attribute(.children)`) which always fails for AX array
             // attributes and silently returns [].
             let harness = makeHarness()
             harness.eval("""
-            var app = hs.application.matchingBundleID('net.tenshu.Hammerspoon-2.TestApp');
+            var app = hs.application.fromPID(testAppPID);
             var items = app.getMenuItems();
             var titles = items ? items.map(function(i) { return i.title; }) : [];
             """)
@@ -414,14 +412,10 @@ struct HSApplicationTests {
         }
 
         @Test("findMenuItemByName finds a top-level menu item")
-        func testFindMenuItemByName() async {
-            await TestAppControl.terminateAll()
-            guard await TestAppControl.launch(detail: "Looks up the menu item New Window by its name") != nil else { return }
-            defer { TestAppControl.running.forEach { $0.terminate() } }
-
+        func testFindMenuItemByName() {
             let harness = makeHarness()
             harness.eval("""
-            var app = hs.application.matchingBundleID('net.tenshu.Hammerspoon-2.TestApp');
+            var app = hs.application.fromPID(testAppPID);
             var item = app.findMenuItemByName('New Window');
             """)
 
@@ -430,18 +424,14 @@ struct HSApplicationTests {
         }
 
         @Test("findMenuItemByPath finds a nested menu item via its path")
-        func testFindMenuItemByPath() async {
-            await TestAppControl.terminateAll()
-            guard await TestAppControl.launch(detail: "Looks up the menu item File > New Window by its path") != nil else { return }
-            defer { TestAppControl.running.forEach { $0.terminate() } }
-
+        func testFindMenuItemByPath() {
             // Regression test: navigateMenuPath previously searched an element's direct
             // children for each path segment, but a menu bar item's actual items sit one
             // level deeper behind an intermediate AXMenu container, so any path beyond
             // the top level always failed to resolve.
             let harness = makeHarness()
             harness.eval("""
-            var app = hs.application.matchingBundleID('net.tenshu.Hammerspoon-2.TestApp');
+            var app = hs.application.fromPID(testAppPID);
             var item = app.findMenuItemByPath(['File', 'New Window']);
             """)
 
@@ -646,8 +636,7 @@ struct HSApplicationTests {
 
         @Test("watcher receives didLaunch when the test app is launched")
         func testDidLaunch() async {
-            await TestAppControl.terminateAll()
-
+            var launched: NSRunningApplication?
             let harness = makeHarness()
             harness.eval("""
             var _dlReceived = false;
@@ -656,10 +645,11 @@ struct HSApplicationTests {
         """)
             defer {
                 harness.eval("hs.application.off('didLaunch', _dlFn)")
-                TestAppControl.running.forEach { $0.terminate() }
+                launched?.terminate()
             }
 
-            guard await TestAppControl.launch(detail: "Launches this app and waits for the didLaunch event") != nil else { return }
+            launched = await TestAppControl.launch(detail: "Launches this app and waits for the didLaunch event")
+            guard launched != nil else { return }
 
             let received = await harness.waitForAsync(timeout: 5.0) {
                 harness.eval("_dlReceived") as? Bool == true
@@ -672,9 +662,9 @@ struct HSApplicationTests {
 
         @Test("watcher receives didHide when the test app is hidden")
         func testDidHide() async {
-            await TestAppControl.terminateAll()
-
-            guard let app = await TestAppControl.launch(detail: "Hides this app and waits for the didHide event") else { return }
+            var launched: NSRunningApplication?
+            launched = await TestAppControl.launch(detail: "Hides this app and waits for the didHide event")
+            guard let app = launched else { return }
 
             let harness = makeHarness()
             harness.eval("""
@@ -684,7 +674,7 @@ struct HSApplicationTests {
         """)
             defer {
                 harness.eval("hs.application.off('didHide', _dhFn)")
-                TestAppControl.running.forEach { $0.terminate() }
+                launched?.terminate()
             }
 
             app.hide()
@@ -700,9 +690,9 @@ struct HSApplicationTests {
 
         @Test("watcher receives didUnhide when the test app is unhidden")
         func testDidUnhide() async {
-            await TestAppControl.terminateAll()
-
-            guard let app = await TestAppControl.launch(detail: "Hides and unhides this app and waits for the didUnhide event") else { return }
+            var launched: NSRunningApplication?
+            launched = await TestAppControl.launch(detail: "Hides and unhides this app and waits for the didUnhide event")
+            guard let app = launched else { return }
             app.hide()
             try? await Task.sleep(for: .milliseconds(500))
 
@@ -714,7 +704,7 @@ struct HSApplicationTests {
         """)
             defer {
                 harness.eval("hs.application.off('didUnhide', _duFn)")
-                TestAppControl.running.forEach { $0.terminate() }
+                launched?.terminate()
             }
 
             app.unhide()
@@ -730,9 +720,9 @@ struct HSApplicationTests {
 
         @Test("watcher receives didTerminate when the test app is terminated")
         func testDidTerminate() async {
-            await TestAppControl.terminateAll()
-
-            guard let app = await TestAppControl.launch(detail: "Quits this app and waits for the didTerminate event") else { return }
+            var launched: NSRunningApplication?
+            launched = await TestAppControl.launch(detail: "Quits this app and waits for the didTerminate event")
+            guard let app = launched else { return }
 
             let harness = makeHarness()
             harness.eval("""
@@ -757,8 +747,7 @@ struct HSApplicationTests {
 
         @Test("listener receives a single application object argument")
         func testCallbackArguments() async {
-            await TestAppControl.terminateAll()
-
+            var launched: NSRunningApplication?
             let harness = makeHarness()
             harness.eval("""
             var _caApp = undefined;
@@ -769,10 +758,11 @@ struct HSApplicationTests {
         """)
             defer {
                 harness.eval("hs.application.off('didLaunch', _caFn)")
-                TestAppControl.running.forEach { $0.terminate() }
+                launched?.terminate()
             }
 
-            guard await TestAppControl.launch(detail: "Launches this app; the didLaunch listener must get one application object") != nil else { return }
+            launched = await TestAppControl.launch(detail: "Launches this app; the didLaunch listener must get one application object")
+            guard launched != nil else { return }
 
             let received = await harness.waitForAsync(timeout: 5.0) {
                 harness.eval("_caApp !== undefined") as? Bool == true
@@ -787,8 +777,7 @@ struct HSApplicationTests {
 
         @Test("multiple listeners all receive the didLaunch event")
         func testMultipleListenersAllReceiveEvent() async {
-            await TestAppControl.terminateAll()
-
+            var launched: NSRunningApplication?
             let harness = makeHarness()
             harness.eval("""
             var _ml1Count = 0, _ml2Count = 0;
@@ -802,10 +791,11 @@ struct HSApplicationTests {
                 hs.application.off('didLaunch', _ml1Fn);
                 hs.application.off('didLaunch', _ml2Fn);
             """)
-                TestAppControl.running.forEach { $0.terminate() }
+                launched?.terminate()
             }
 
-            guard await TestAppControl.launch(detail: "Launches this app; both didLaunch listeners must fire") != nil else { return }
+            launched = await TestAppControl.launch(detail: "Launches this app; both didLaunch listeners must fire")
+            guard launched != nil else { return }
 
             let received = await harness.waitForAsync(timeout: 5.0) {
                 harness.eval("_ml1Count > 0 && _ml2Count > 0") as? Bool == true
@@ -819,8 +809,7 @@ struct HSApplicationTests {
 
         @Test("a removed listener does not receive subsequent events")
         func testRemovedListenerDoesNotReceiveEvents() async {
-            await TestAppControl.terminateAll()
-
+            var launched: NSRunningApplication?
             let harness = makeHarness()
             harness.eval("""
             var _rlRemovedCount = 0, _rlKeptCount = 0;
@@ -832,10 +821,11 @@ struct HSApplicationTests {
         """)
             defer {
                 harness.eval("hs.application.off('didLaunch', _rlKeptFn)")
-                TestAppControl.running.forEach { $0.terminate() }
+                launched?.terminate()
             }
 
-            guard await TestAppControl.launch(detail: "Launches this app; the removed didLaunch listener must stay silent") != nil else { return }
+            launched = await TestAppControl.launch(detail: "Launches this app; the removed didLaunch listener must stay silent")
+            guard launched != nil else { return }
 
             let received = await harness.waitForAsync(timeout: 5.0) {
                 harness.eval("_rlKeptCount > 0") as? Bool == true
@@ -851,15 +841,16 @@ struct HSApplicationTests {
 
         @Test("a listener registered for one event does not receive a different real event")
         func testListenerDoesNotReceiveOtherRealEvents() async {
-            await TestAppControl.terminateAll()
-
+            var launched: NSRunningApplication?
             let harness = makeHarness()
             harness.eval("""
-            // Only count Chess: other apps launch and quit system-wide while this runs,
-            // including from tests in other suites.
+            // Only count the test app: other apps launch and quit system-wide while this runs,
+            // including copies of the test app from tests in other suites.
             var _cfLaunchCount = 0, _cfTerminateCount = 0;
-            var _cfLaunchFn = function(app) { if (app.bundleID === 'com.apple.Chess') _cfLaunchCount++; };
-            var _cfTerminateFn = function(app) { if (app.bundleID === 'com.apple.Chess') _cfTerminateCount++; };
+            var _cfLaunchFn = function(app) { if (app && app.bundleID === 'net.tenshu.Hammerspoon-2.TestApp') _cfLaunchCount++; };
+            // Counts only this test's copy: other suites quit their own copies meanwhile
+            var _cfPID = -1;
+            var _cfTerminateFn = function(app) { if (app && app.pid === _cfPID) _cfTerminateCount++; };
             hs.application.on('didLaunch', _cfLaunchFn);
             hs.application.on('didTerminate', _cfTerminateFn);
         """)
@@ -868,10 +859,12 @@ struct HSApplicationTests {
                 hs.application.off('didLaunch', _cfLaunchFn);
                 hs.application.off('didTerminate', _cfTerminateFn);
             """)
-                TestAppControl.running.forEach { $0.terminate() }
+                launched?.terminate()
             }
 
-            guard await TestAppControl.launch(detail: "Launches this app; the didTerminate listener must stay silent") != nil else { return }
+            launched = await TestAppControl.launch(detail: "Launches this app; the didTerminate listener must stay silent")
+            guard let pid = launched?.processIdentifier else { return }
+            harness.eval("_cfPID = \(pid);")
 
             let received = await harness.waitForAsync(timeout: 5.0) {
                 harness.eval("_cfLaunchCount > 0") as? Bool == true
