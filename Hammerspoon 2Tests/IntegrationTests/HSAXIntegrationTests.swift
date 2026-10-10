@@ -1716,10 +1716,11 @@ struct HSAXTests {
     // MARK: - Suite 5: Watcher event delivery (requires accessibility permissions)
 
     /// Tests that actual AX notifications are delivered to registered JavaScript callbacks.
-    /// These tests open a new Finder window using NSAppleScript to trigger AXWindowCreated
-    /// and clean up afterwards. They are skipped gracefully if AppleScript cannot open
-    /// the window (e.g. on a headless runner with no Automation permission for Finder).
-    @Suite("hs.ax watcher event delivery tests", .serialized, .disabled(if: !isAccessibilityEnabled(), "Accessibility permissions not available"))
+    /// These tests launch the Hammerspoon 2 Test App (``TestAppControl``) and have it open a window to
+    /// trigger AXWindowCreated.
+    @Suite("hs.ax watcher event delivery tests", .serialized,
+           .disabled(if: !isAccessibilityEnabled(), "Accessibility permissions not available"),
+           .enabled(if: TestAppControl.isAvailable, "The test app could not be built"))
     struct HSAXWatcherEventTests {
 
         private func makeHarness() -> JSTestHarness {
@@ -1729,40 +1730,30 @@ struct HSAXTests {
             return harness
         }
 
-        /// Returns true if a new Finder window was successfully opened.
-        private func openFinderWindow() -> Bool {
-            let script = NSAppleScript(source: "tell application \"Finder\" to make new Finder window")
-            var error: NSDictionary?
-            script?.executeAndReturnError(&error)
-            return error == nil
-        }
-
-        /// Closes the frontmost Finder window; safe to call even if none is open.
-        private func closeFinderWindow() {
-            let src = "tell application \"Finder\" to if (count of Finder windows) > 0 then close Finder window 1"
-            NSAppleScript(source: src)?.executeAndReturnError(nil)
-        }
-
-        @Test("watcher receives 'windowCreated' when a new Finder window is opened")
+        @Test("watcher receives 'windowCreated' when the test app opens a window")
         func testWatcherReceivesWindowCreated() async {
+            await TestAppControl.terminateAll()
+            guard await TestAppControl.launch(detail: "Opens a window here and waits for windowCreated") != nil else { return }
+            defer { TestAppControl.running.forEach { $0.terminate() } }
+
             let harness = makeHarness()
 
             harness.eval("""
-            var _ed1Finder = hs.application.matchingBundleID('com.apple.finder');
-            var _ed1Elem = hs.ax.applicationElement(_ed1Finder);
+            var _ed1App = hs.application.matchingBundleID('net.tenshu.Hammerspoon-2.TestApp');
+            var _ed1Elem = hs.ax.applicationElement(_ed1App);
             var _ed1Events = [];
             var _ed1Fn = function(notification, elem) { _ed1Events.push(notification); };
             hs.ax.on(_ed1Elem, 'AXWindowCreated', _ed1Fn);
         """)
             defer { harness.eval("hs.ax.off(_ed1Elem, 'AXWindowCreated', _ed1Fn);") }
 
-            guard openFinderWindow() else { return }
-            defer { closeFinderWindow() }
+            TestAppControl.openWindow()
 
             let received = await harness.waitForAsync(timeout: 2.0) {
                 harness.eval("_ed1Events.length > 0") as? Bool == true
             }
 
+            #expect(received, "no windowCreated notification arrived")
             if received {
                 harness.expectTrue("_ed1Events.indexOf('windowCreated') !== -1")
             }
@@ -1770,11 +1761,15 @@ struct HSAXTests {
 
         @Test("multiple listeners all receive the same windowCreated notification")
         func testMultipleListenersAllReceiveEvent() async {
+            await TestAppControl.terminateAll()
+            guard await TestAppControl.launch(detail: "Opens a window here; both windowCreated listeners must fire") != nil else { return }
+            defer { TestAppControl.running.forEach { $0.terminate() } }
+
             let harness = makeHarness()
 
             harness.eval("""
-            var _ed2Finder = hs.application.matchingBundleID('com.apple.finder');
-            var _ed2Elem = hs.ax.applicationElement(_ed2Finder);
+            var _ed2App = hs.application.matchingBundleID('net.tenshu.Hammerspoon-2.TestApp');
+            var _ed2Elem = hs.ax.applicationElement(_ed2App);
             var _ed2Count1 = 0, _ed2Count2 = 0;
             var _ed2Fn1 = function(n, e) { if (n === 'windowCreated') _ed2Count1++; };
             var _ed2Fn2 = function(n, e) { if (n === 'windowCreated') _ed2Count2++; };
@@ -1788,13 +1783,13 @@ struct HSAXTests {
             """)
             }
 
-            guard openFinderWindow() else { return }
-            defer { closeFinderWindow() }
+            TestAppControl.openWindow()
 
             let received = await harness.waitForAsync(timeout: 2.0) {
                 harness.eval("_ed2Count1 > 0 && _ed2Count2 > 0") as? Bool == true
             }
 
+            #expect(received, "no windowCreated notification arrived")
             if received {
                 harness.expectTrue("_ed2Count1 > 0")
                 harness.expectTrue("_ed2Count2 > 0")
@@ -1803,11 +1798,15 @@ struct HSAXTests {
 
         @Test("a removed listener does not receive subsequent events")
         func testRemovedListenerDoesNotReceiveEvents() async {
+            await TestAppControl.terminateAll()
+            guard await TestAppControl.launch(detail: "Opens a window here; the removed listener must stay silent") != nil else { return }
+            defer { TestAppControl.running.forEach { $0.terminate() } }
+
             let harness = makeHarness()
 
             harness.eval("""
-            var _ed3Finder = hs.application.matchingBundleID('com.apple.finder');
-            var _ed3Elem = hs.ax.applicationElement(_ed3Finder);
+            var _ed3App = hs.application.matchingBundleID('net.tenshu.Hammerspoon-2.TestApp');
+            var _ed3Elem = hs.ax.applicationElement(_ed3App);
             var _ed3RemovedCount = 0, _ed3KeptCount = 0;
             var _ed3RemovedFn = function(n, e) { _ed3RemovedCount++; };
             var _ed3KeptFn = function(n, e) { if (n === 'windowCreated') _ed3KeptCount++; };
@@ -1817,13 +1816,13 @@ struct HSAXTests {
         """)
             defer { harness.eval("hs.ax.off(_ed3Elem, 'AXWindowCreated', _ed3KeptFn);") }
 
-            guard openFinderWindow() else { return }
-            defer { closeFinderWindow() }
+            TestAppControl.openWindow()
 
             let received = await harness.waitForAsync(timeout: 2.0) {
                 harness.eval("_ed3KeptCount > 0") as? Bool == true
             }
 
+            #expect(received, "no windowCreated notification arrived")
             if received {
                 harness.expectTrue("_ed3KeptCount > 0")
                 harness.expectEqual("_ed3RemovedCount", 0)
@@ -1832,11 +1831,15 @@ struct HSAXTests {
 
         @Test("watcher callback receives the camelCase notification name and an element object")
         func testWatcherCallbackReceivesCorrectArguments() async {
+            await TestAppControl.terminateAll()
+            guard await TestAppControl.launch(detail: "Opens a window here; the callback must get the camelCase name and an element") != nil else { return }
+            defer { TestAppControl.running.forEach { $0.terminate() } }
+
             let harness = makeHarness()
 
             harness.eval("""
-            var _ed4Finder = hs.application.matchingBundleID('com.apple.finder');
-            var _ed4TargetElem = hs.ax.applicationElement(_ed4Finder);
+            var _ed4App = hs.application.matchingBundleID('net.tenshu.Hammerspoon-2.TestApp');
+            var _ed4TargetElem = hs.ax.applicationElement(_ed4App);
             var _ed4Notif = null, _ed4Elem = null;
             var _ed4Fn = function(notification, element) {
                 _ed4Notif = notification;
@@ -1846,13 +1849,13 @@ struct HSAXTests {
         """)
             defer { harness.eval("hs.ax.off(_ed4TargetElem, 'AXWindowCreated', _ed4Fn);") }
 
-            guard openFinderWindow() else { return }
-            defer { closeFinderWindow() }
+            TestAppControl.openWindow()
 
             let received = await harness.waitForAsync(timeout: 2.0) {
                 harness.eval("_ed4Notif !== null") as? Bool == true
             }
 
+            #expect(received, "no windowCreated notification arrived")
             if received {
                 // Notification is delivered as the camelCase key (e.g. "windowCreated"), not "AXWindowCreated"
                 harness.expectEqual("_ed4Notif", "windowCreated")
@@ -1862,11 +1865,15 @@ struct HSAXTests {
 
         @Test("watcher callback element has a valid role string")
         func testWatcherCallbackElementHasRole() async {
+            await TestAppControl.terminateAll()
+            guard await TestAppControl.launch(detail: "Opens a window here; the element passed to the callback must have a role") != nil else { return }
+            defer { TestAppControl.running.forEach { $0.terminate() } }
+
             let harness = makeHarness()
 
             harness.eval("""
-            var _ed5Finder = hs.application.matchingBundleID('com.apple.finder');
-            var _ed5Elem = hs.ax.applicationElement(_ed5Finder);
+            var _ed5App = hs.application.matchingBundleID('net.tenshu.Hammerspoon-2.TestApp');
+            var _ed5Elem = hs.ax.applicationElement(_ed5App);
             var _ed5Role = null;
             var _ed5Fn = function(notification, element) {
                 if (element) { _ed5Role = element.role; }
@@ -1875,13 +1882,13 @@ struct HSAXTests {
         """)
             defer { harness.eval("hs.ax.off(_ed5Elem, 'AXWindowCreated', _ed5Fn);") }
 
-            guard openFinderWindow() else { return }
-            defer { closeFinderWindow() }
+            TestAppControl.openWindow()
 
             let received = await harness.waitForAsync(timeout: 2.0) {
                 harness.eval("_ed5Role !== null") as? Bool == true
             }
 
+            #expect(received, "no windowCreated notification arrived")
             if received {
                 harness.expectTrue("typeof _ed5Role === 'string' && _ed5Role.length > 0")
             }
@@ -1889,24 +1896,28 @@ struct HSAXTests {
 
         @Test("watcher registered with an array of notifications receives events for them")
         func testWatcherWithArrayOfNotificationsReceivesEvents() async {
+            await TestAppControl.terminateAll()
+            guard await TestAppControl.launch(detail: "Opens a window here; a watcher for an array of notifications must fire") != nil else { return }
+            defer { TestAppControl.running.forEach { $0.terminate() } }
+
             let harness = makeHarness()
 
             harness.eval("""
-            var _ed6Finder = hs.application.matchingBundleID('com.apple.finder');
-            var _ed6Elem = hs.ax.applicationElement(_ed6Finder);
+            var _ed6App = hs.application.matchingBundleID('net.tenshu.Hammerspoon-2.TestApp');
+            var _ed6Elem = hs.ax.applicationElement(_ed6App);
             var _ed6Events = [];
             var _ed6Fn = function(notification, elem) { _ed6Events.push(notification); };
             hs.ax.on(_ed6Elem, ['AXWindowCreated', 'AXWindowMoved'], _ed6Fn);
         """)
             defer { harness.eval("hs.ax.off(_ed6Elem, ['AXWindowCreated', 'AXWindowMoved'], _ed6Fn);") }
 
-            guard openFinderWindow() else { return }
-            defer { closeFinderWindow() }
+            TestAppControl.openWindow()
 
             let received = await harness.waitForAsync(timeout: 2.0) {
                 harness.eval("_ed6Events.length > 0") as? Bool == true
             }
 
+            #expect(received, "no windowCreated notification arrived")
             if received {
                 harness.expectTrue("_ed6Events.indexOf('windowCreated') !== -1")
             }
