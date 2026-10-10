@@ -693,20 +693,36 @@ and record all call arguments so tests can assert on them.
 
 ## Tests that need a real other application
 
-Use the Hammerspoon 2 Test App through `TestAppControl` (`Hammerspoon 2Tests/Helpers/TestApp/`), not Finder, Chess or another app of the user's: it starts in about 0.2 s, shows nothing personal, has English menu titles (`File` > `New Window`) whatever the system language, and its window names the running test.
+Use the Hammerspoon 2 Test App through `TestAppControl` (`Hammerspoon 2Tests/Helpers/TestApp/`), not Finder, Chess or another app of the user's: it starts in about 0.3 s, shows nothing personal, has English menu titles (`File` > `New Window`) whatever the system language, always has one window, and its windows name the running test.
+
+**A suite that only needs the app to be there** takes the `.testApp` trait: one copy runs for the whole suite (nested suites included) and `TestAppControl.pid` names it. Address it by pid, never by bundle ID: other suites run their own copies at the same time.
 
 ```swift
-@Suite("hs.foo event tests", .serialized, .enabled(if: TestAppControl.isAvailable, "The test app could not be built"))
-struct HSFooEventTests {
+@Suite("hs.foo element tests", .serialized, .enabled(if: TestAppControl.isAvailable, "The test app could not be built"), .testApp)
+struct HSFooElementTests {
+    private func makeHarness() -> JSTestHarness {
+        let harness = JSTestHarness()
+        harness.loadModule(HSApplicationModule.self, as: "application")
+        harness.eval("var testAppPID = \(TestAppControl.pid ?? -1);")
+        TestAppControl.showCurrentTest()   // the app's window names this test
+        return harness
+    }
+
     @Test("watcher receives windowCreated")
     func testWindowCreated() async {
-        await TestAppControl.terminateAll()
-        guard let app = await TestAppControl.launch(detail: "Opens a window here and waits for windowCreated") else { return }
-        defer { TestAppControl.running.forEach { $0.terminate() } }
-        // … register the watcher on hs.application.matchingBundleID('net.tenshu.Hammerspoon-2.TestApp') …
+        let harness = makeHarness()
+        defer { TestAppControl.closeWindows() }
+        // … register the watcher on hs.application.fromPID(testAppPID) …
         TestAppControl.openWindow()
     }
 }
 ```
 
-`launch` returns once the app's window is on screen; `app.hide()` / `app.unhide()` work from then on. `build-test-app.sh` in that folder builds the app with `swiftc` on first use; a new command for the app goes into `TestApp.swift` (`handleCommand`) and `TestAppControl`.
+**A test about launching, hiding or quitting** launches its own copy and quits what it launched:
+
+```swift
+let app = await TestAppControl.launch(detail: "Hides this app and waits for the didHide event")
+defer { app?.terminate() }
+```
+
+`launch` returns once the app's window is on screen; `app.hide()` / `app.unhide()` work from then on. A listener for events of all apps (`didTerminate`) must filter by the pid of its own copy. `build-test-app.sh` in that folder builds the app with `swiftc` on first use; a new command for the app goes into `TestApp.swift` (`handleCommand`) and `TestAppControl`.

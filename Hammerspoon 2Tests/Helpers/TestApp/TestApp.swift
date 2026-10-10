@@ -17,7 +17,8 @@
 import AppKit
 
 /// Tests send commands as a distributed notification with this name. `userInfo`:
-/// `command` is `show` (with `test` and `detail`), `newWindow` or `closeWindows`.
+/// `command` is `show` (with `test` and `detail`), `newWindow` or `closeWindows`; `pid` is the
+/// copy it is meant for, since several can run at once.
 let commandNotification = Notification.Name("net.tenshu.Hammerspoon-2.TestApp.command")
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
@@ -43,6 +44,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func handleCommand(_ notification: Notification) {
         let info = notification.userInfo
+        guard info?["pid"] as? String == String(ProcessInfo.processInfo.processIdentifier) else { return }
         switch info?["command"] as? String {
         case "show": show(test: info?["test"] as? String, detail: info?["detail"] as? String)
         case "newWindow": newWindow(nil)

@@ -11,6 +11,11 @@ import Testing
 /// a real other application, instead of Finder or Chess. It starts in about 0.2 s, shows nothing
 /// personal, and its window says which test is running.
 ///
+/// Two ways to use it. A suite that only needs the app to be there takes the `.testApp` trait:
+/// one copy runs for the whole suite, and `pid` names it (in JS: `hs.application.fromPID(pid)`).
+/// A test about launching or quitting calls `launch(detail:)` itself and quits what it launched.
+/// Every copy is addressed by its pid, so suites running side by side don't disturb each other.
+///
 /// Its source is `TestApp.swift` next to this file; `build-test-app.sh`, also here, builds it on
 /// first use and after a change.
 nonisolated enum TestAppControl {
@@ -36,22 +41,22 @@ nonisolated enum TestAppControl {
     /// For `.enabled(if:)`: whether the app could be built.
     static var isAvailable: Bool { url != nil }
 
-    static var running: [NSRunningApplication] {
-        NSWorkspace.shared.runningApplications.filter { $0.bundleIdentifier == bundleID }
-    }
+    /// The copy the `.testApp` trait launched for the running suite; nil outside such a suite.
+    @TaskLocal static var pid: pid_t?
 
-    /// Launches the app in the background and waits until its window is on screen. Only then is it
-    /// ready: `hide()` right after `isFinishedLaunching` does nothing.
+    /// Launches a new copy in the background and waits until its window is on screen. Only then
+    /// is it ready: `hide()` right after `isFinishedLaunching` does nothing.
     /// - Parameter detail: What the test checks; shown in the app's window below the test's name
     /// - Returns: The running app, or nil when it couldn't be launched
     @MainActor
     static func launch(detail: String = "") async -> NSRunningApplication? {
         guard let url else { return nil }
+        _ = leftoversQuit
         let configuration = NSWorkspace.OpenConfiguration()
         configuration.activates = false
         configuration.addsToRecentItems = false
         configuration.createsNewApplicationInstance = true
-        configuration.arguments = ["-test", Test.current?.displayName ?? Test.current?.name ?? "", "-detail", detail]
+        configuration.arguments = ["-test", currentTestName, "-detail", detail]
         guard let app = try? await NSWorkspace.shared.openApplication(at: url, configuration: configuration) else { return nil }
         let deadline = Date().addingTimeInterval(5)
         while !(app.isFinishedLaunching && hasWindowOnScreen(app)), Date() < deadline {
@@ -60,28 +65,69 @@ nonisolated enum TestAppControl {
         return app
     }
 
+    /// `launch(detail:)` for callers off the main actor, which can't take the app object across.
+    @MainActor
+    static func launchedPID(detail: String) async -> pid_t? {
+        await launch(detail: detail)?.processIdentifier
+    }
+
+    /// Copies an earlier, aborted test run left behind are quit before the first launch of this run.
+    @MainActor
+    private static let leftoversQuit: Void = {
+        NSWorkspace.shared.runningApplications.filter { $0.bundleIdentifier == bundleID }.forEach { $0.terminate() }
+    }()
+
+    private static var currentTestName: String { Test.current?.displayName ?? Test.current?.name ?? "" }
+
     private static func hasWindowOnScreen(_ app: NSRunningApplication) -> Bool {
         let windows = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
         return windows.contains { ($0[kCGWindowOwnerPID as String] as? pid_t) == app.processIdentifier }
     }
 
-    /// Quits every running copy and waits until they are gone.
-    @MainActor
-    static func terminateAll() async {
-        running.forEach { $0.terminate() }
-        let deadline = Date().addingTimeInterval(5)
-        while !running.isEmpty, Date() < deadline {
-            try? await Task.sleep(for: .milliseconds(20))
-        }
+    // MARK: - Commands to a running copy
+
+    /// Shows the running test's name in the suite's copy, and what it checks.
+    static func showCurrentTest(detail: String = "") {
+        send("show", to: pid, ["test": currentTestName, "detail": detail])
     }
 
-    /// Has the running app open one more window.
-    static func openWindow() {
-        send(["command": "newWindow"])
+    /// Has a copy open one more window.
+    /// - Parameter pid: The copy; the suite's copy by default
+    static func openWindow(in pid: pid_t? = TestAppControl.pid) {
+        send("newWindow", to: pid)
     }
 
-    private static func send(_ command: [String: String]) {
+    /// Has a copy close the windows `openWindow` opened.
+    /// - Parameter pid: The copy; the suite's copy by default
+    static func closeWindows(in pid: pid_t? = TestAppControl.pid) {
+        send("closeWindows", to: pid)
+    }
+
+    private static func send(_ command: String, to pid: pid_t?, _ arguments: [String: String] = [:]) {
+        guard let pid else { return }
+        var userInfo = arguments
+        userInfo["command"] = command
+        userInfo["pid"] = String(pid)
         DistributedNotificationCenter.default().postNotificationName(
-            Notification.Name("\(bundleID).command"), object: nil, userInfo: command, deliverImmediately: true)
+            Notification.Name("\(bundleID).command"), object: nil, userInfo: userInfo, deliverImmediately: true)
     }
+}
+
+/// Runs one copy of the test app for the whole suite; `TestAppControl.pid` names it.
+nonisolated struct TestAppTrait: SuiteTrait, TestScoping {
+    @concurrent
+    func provideScope(for test: Test, testCase: Test.Case?, performing function: @concurrent @Sendable () async throws -> Void) async throws {
+        let pid = await TestAppControl.launchedPID(detail: "One copy for the whole suite")
+        guard let pid else {
+            Issue.record("The test app could not be launched")
+            return
+        }
+        defer { NSRunningApplication(processIdentifier: pid)?.terminate() }
+        try await TestAppControl.$pid.withValue(pid) { try await function() }
+    }
+}
+
+nonisolated extension Trait where Self == TestAppTrait {
+    /// Runs one copy of the Hammerspoon 2 Test App for the whole suite.
+    static var testApp: Self { Self() }
 }
