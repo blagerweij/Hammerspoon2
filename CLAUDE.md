@@ -82,8 +82,8 @@ Tests live in `Hammerspoon 2Tests/` and are integration tests â€” they test JSâ†
 
 ```swift
 let harness = JSTestHarness()
-harness.loadModule(HSHashModule.self, as: "hash")
-harness.expectEqual("hash.md5('hello')", "5d41402abc4b2a76b9719d911017c592")
+harness.loadModule(HSHashModule.self, as: "hashing")
+harness.expectEqual("hs.hashing.md5('hello')", "5d41402abc4b2a76b9719d911017c592")
 ```
 
 For async: `harness.registerCallback("name") { ... }` + `harness.waitFor(timeout:) { condition }`.
