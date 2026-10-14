@@ -19,7 +19,7 @@ import Testing
 /// Example usage:
 /// ```swift
 /// let harness = JSTestHarness()
-/// harness.loadModule(HSHashModule.self, as: "hash")
+/// harness.loadModule(HSHashModule.self, as: "hashing")
 /// let result = harness.eval("hs.hashing.md5('hello')")
 /// #expect(result == "5d41402abc4b2a76b9719d911017c592")
 /// ```
