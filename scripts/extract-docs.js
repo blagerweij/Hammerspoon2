@@ -35,6 +35,9 @@ const MODULE_NAME_OVERRIDES = {
     // which silently drops its .swift files from the Sources build phase. See the sibling
     // note in Modules/hs.midi_/HSMIDIModule.swift.
     'hs.midi_': 'hs.midi',
+    // ModuleRoot exposes this as "hashing" because it is an NSObject subclass, and
+    // NSObject's own `hash` property makes "hash" unusable as a module property name.
+    'hs.hash': 'hs.hashing',
 };
 
 // Protocol name -> public JS namespace, for JSExport protocols whose methods should be

@@ -20,7 +20,7 @@ import Testing
 /// ```swift
 /// let harness = JSTestHarness()
 /// harness.loadModule(HSHashModule.self, as: "hash")
-/// let result = harness.eval("hs.hash.md5('hello')")
+/// let result = harness.eval("hs.hashing.md5('hello')")
 /// #expect(result == "5d41402abc4b2a76b9719d911017c592")
 /// ```
 class JSTestHarness {
@@ -566,7 +566,7 @@ extension JSTestHarness {
             // We need to use runtime type information here
             // This is a limitation of Swift's type system
             switch name {
-            case "hash", "hashing":
+            case "hashing":
                 loadModule(HSHashModule.self, as: name)
             case "timer":
                 loadModule(HSTimerModule.self, as: name)

@@ -113,7 +113,7 @@ for what changed within it.
 | `hs.audiodevice.datasource` | Gone | no separate data-source API found |
 | `hs.audiodevice.watcher` | → `hs.audiodevice` | `on()`/`off()`/`once()` |
 | `hs.axuielement` (+`.axtextmarker`, `.observer`) | → `hs.ax` | [details](#hsax-accessibility) |
-| `hs.base64` | → `hs.hash` | `base64Encode`/`base64Decode` |
+| `hs.base64` | → `hs.hashing` | `base64Encode`/`base64Decode` |
 | `hs.battery` (+`.watcher`) | → `hs.power` | [details](#hspower) |
 | `hs.bonjour` (+`.service`) | Present | `.service` objects returned inline, not a submodule |
 | `hs.brightness` | → `hs.screen` | `getBrightness()`/`setBrightness()`, see [details](#hsscreen) |
@@ -135,7 +135,7 @@ for what changed within it.
 | `hs.fs` (+`.volume`,`.xattr`) | Present | comprehensive; see below |
 | `hs.geometry` | → `HSPoint`/`HSRect`/`HSSize` | value types with math methods built in — see [details](#hsgeometry) |
 | `hs.grid` | Gone | see [Window management](#window-management) |
-| `hs.hash` | Present | absorbed base64, gained HMAC variants |
+| `hs.hash` | → `hs.hashing` | absorbed base64, gained HMAC variants |
 | `hs.hid` (+`.led`) | → `hs.keyboard` | [details](#hshid--hskeyboard) |
 | `hs.hints` | Gone | no on-screen hint overlay |
 | `hs.host` (+`.locale`) | → several modules | [details](#hshost) |
