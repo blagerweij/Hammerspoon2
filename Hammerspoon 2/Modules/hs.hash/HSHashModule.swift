@@ -19,7 +19,7 @@ import CryptoKit
     /// - Returns: Base64 encoded string
     /// - Example:
     /// ```js
-    /// console.log(hs.hash.base64Encode("Hello"))
+    /// console.log(hs.hashing.base64Encode("Hello"))
     /// ```
     @objc func base64Encode(_ data: String) -> String
 
@@ -28,7 +28,7 @@ import CryptoKit
     /// - Returns: Decoded string, or nil if the input is invalid
     /// - Example:
     /// ```js
-    /// console.log(hs.hash.base64Decode("SGVsbG8="))
+    /// console.log(hs.hashing.base64Decode("SGVsbG8="))
     /// ```
     @objc func base64Decode(_ data: String) -> String?
 
@@ -38,7 +38,7 @@ import CryptoKit
     /// - Returns: Hexadecimal MD5 hash
     /// - Example:
     /// ```js
-    /// console.log(hs.hash.md5("hello"))
+    /// console.log(hs.hashing.md5("hello"))
     /// ```
     @objc func md5(_ data: String) -> String
 
@@ -47,7 +47,7 @@ import CryptoKit
     /// - Returns: Hexadecimal SHA1 hash
     /// - Example:
     /// ```js
-    /// console.log(hs.hash.sha1("hello"))
+    /// console.log(hs.hashing.sha1("hello"))
     /// ```
     @objc func sha1(_ data: String) -> String
 
@@ -56,7 +56,7 @@ import CryptoKit
     /// - Returns: Hexadecimal SHA256 hash
     /// - Example:
     /// ```js
-    /// console.log(hs.hash.sha256("hello"))
+    /// console.log(hs.hashing.sha256("hello"))
     /// ```
     @objc func sha256(_ data: String) -> String
 
@@ -65,7 +65,7 @@ import CryptoKit
     /// - Returns: Hexadecimal SHA512 hash
     /// - Example:
     /// ```js
-    /// console.log(hs.hash.sha512("hello"))
+    /// console.log(hs.hashing.sha512("hello"))
     /// ```
     @objc func sha512(_ data: String) -> String
 
@@ -77,7 +77,7 @@ import CryptoKit
     /// - Returns: Hexadecimal HMAC-MD5
     /// - Example:
     /// ```js
-    /// console.log(hs.hash.hmacMD5("secret", "hello"))
+    /// console.log(hs.hashing.hmacMD5("secret", "hello"))
     /// ```
     @objc func hmacMD5(_ key: String, _ data: String) -> String
 
@@ -88,7 +88,7 @@ import CryptoKit
     /// - Returns: Hexadecimal HMAC-SHA1
     /// - Example:
     /// ```js
-    /// console.log(hs.hash.hmacSHA1("secret", "hello"))
+    /// console.log(hs.hashing.hmacSHA1("secret", "hello"))
     /// ```
     @objc func hmacSHA1(_ key: String, _ data: String) -> String
 
@@ -99,7 +99,7 @@ import CryptoKit
     /// - Returns: Hexadecimal HMAC-SHA256
     /// - Example:
     /// ```js
-    /// console.log(hs.hash.hmacSHA256("secret", "hello"))
+    /// console.log(hs.hashing.hmacSHA256("secret", "hello"))
     /// ```
     @objc func hmacSHA256(_ key: String, _ data: String) -> String
 
@@ -110,7 +110,7 @@ import CryptoKit
     /// - Returns: Hexadecimal HMAC-SHA512
     /// - Example:
     /// ```js
-    /// console.log(hs.hash.hmacSHA512("secret", "hello"))
+    /// console.log(hs.hashing.hmacSHA512("secret", "hello"))
     /// ```
     @objc func hmacSHA512(_ key: String, _ data: String) -> String
 }
@@ -120,7 +120,7 @@ import CryptoKit
 @_documentation(visibility: private)
 @MainActor
 @objc class HSHashModule: NSObject, HSModuleAPI, HSHashModuleAPI {
-    var moduleName = "hs.hash"
+    var moduleName = "hs.hashing"
     let engineID: UUID
 
     // MARK: - Module lifecycle
