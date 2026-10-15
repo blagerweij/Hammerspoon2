@@ -604,6 +604,149 @@ struct HSCanvasTests {
         }
     }
 
+    // MARK: - Opacity and fading (issue #289)
+
+    @Suite("hs.canvas opacity and fading tests", .serialized)
+    @MainActor
+    struct FadeTests {
+        // Tests that wait for a fade to finish are async: AppKit delivers the fade's
+        // completion through the main queue, which a sync @MainActor test blocks while it
+        // spins the run loop in waitFor(), so the fade would never seem to finish.
+
+        private func makeHarness() -> JSTestHarness {
+            let harness = JSTestHarness()
+            harness.loadModule(HSCanvasModule.self, as: "canvas")
+            return harness
+        }
+
+        private func canvas(_ harness: JSTestHarness, _ name: String = "c") -> HSCanvas? {
+            harness.evalValue(name)?.toObjectOf(HSCanvas.self) as? HSCanvas
+        }
+
+        @Test("alpha() defaults to 1, and setAlpha() clamps to 0...1 and chains")
+        func alphaRoundTrip() {
+            let harness = makeHarness()
+            harness.eval("var c = hs.canvas.create({x: 0, y: 0, w: 50, h: 50})")
+            #expect(harness.evalDouble("c.alpha()") == 1)
+            #expect(harness.evalDouble("c.setAlpha(0.25).alpha()") == 0.25)
+            #expect(harness.evalDouble("c.setAlpha(3).alpha()") == 1)
+            #expect(harness.evalDouble("c.setAlpha(-1).alpha()") == 0)
+            #expect(!harness.hasException)
+        }
+
+        @Test("setAlpha() with no number leaves the opacity alone")
+        func alphaIgnoresMissingValue() {
+            let harness = makeHarness()
+            harness.eval("var c = hs.canvas.create({x: 0, y: 0, w: 50, h: 50}).setAlpha(0.5); c.setAlpha()")
+            #expect(harness.evalDouble("c.alpha()") == 0.5)
+            #expect(!harness.hasException)
+        }
+
+        @Test("setAlpha() applies to a shown window straight away")
+        func alphaAppliesToShownWindow() {
+            let harness = makeHarness()
+            harness.eval("var c = hs.canvas.create({x: 0, y: 0, w: 50, h: 50}); c.show(); c.setAlpha(0.4)")
+            #expect(canvas(harness)?.windowAlphaValue == 0.4)
+            harness.eval("c.destroy()")
+        }
+
+        @Test("show() with no fade time shows the canvas immediately at its alpha")
+        func showWithoutFade() {
+            let harness = makeHarness()
+            harness.eval("var c = hs.canvas.create({x: 0, y: 0, w: 50, h: 50}).setAlpha(0.6).show()")
+            #expect(harness.evalBool("c.isShowing()") == true)
+            #expect(canvas(harness)?.windowAlphaValue == 0.6)
+            harness.eval("c.hide(); c.destroy()")
+            #expect(!harness.hasException)
+        }
+
+        @Test("show(t) fades the window in from transparent to the canvas's alpha")
+        func showFadesIn() async {
+            let harness = makeHarness()
+            harness.eval("var c = hs.canvas.create({x: 0, y: 0, w: 50, h: 50}).setAlpha(0.8).show(0.1)")
+            let c = canvas(harness)
+            #expect(harness.evalBool("c.isShowing()") == true)
+            #expect((c?.windowAlphaValue ?? 1) < 0.8, "A fade-in must start below the target alpha")
+            #expect(await harness.waitForAsync(timeout: 1.0) { c?.windowAlphaValue == 0.8 })
+            harness.eval("c.destroy()")
+        }
+
+        @Test("hide(t) keeps the canvas showing until the fade ends, then restores its alpha")
+        func hideFadesOut() async {
+            let harness = makeHarness()
+            harness.eval("var c = hs.canvas.create({x: 0, y: 0, w: 50, h: 50}).setAlpha(0.5).show(); c.hide(0.1)")
+            let c = canvas(harness)
+            #expect(harness.evalBool("c.isShowing()") == true, "The canvas stays on screen while it fades")
+            #expect(await harness.waitForAsync(timeout: 1.0) { c?.isShowing() == false })
+            #expect(c?.windowAlphaValue == 0.5, "The next show() must come back at the canvas's alpha")
+            #expect(harness.evalDouble("c.alpha()") == 0.5)
+            harness.eval("c.destroy()")
+        }
+
+        @Test("show() during a fade-out cancels it, and the canvas stays shown at its alpha")
+        func showCancelsFadeOut() async {
+            let harness = makeHarness()
+            harness.eval("var c = hs.canvas.create({x: 0, y: 0, w: 50, h: 50}).setAlpha(0.5).show(); c.hide(0.1); c.show()")
+            let c = canvas(harness)
+            try? await Task.sleep(for: .milliseconds(300))
+            #expect(c?.isShowing() == true, "The cancelled fade-out must not hide the canvas")
+            #expect(c?.windowAlphaValue == 0.5)
+            harness.eval("c.destroy()")
+        }
+
+        @Test("show(t) during a fade-out fades back in to the canvas's alpha, not to 0")
+        func fadeInDuringFadeOut() async {
+            let harness = makeHarness()
+            harness.eval("var c = hs.canvas.create({x: 0, y: 0, w: 50, h: 50}).setAlpha(0.7).show(); c.hide(0.2)")
+            let c = canvas(harness)
+            try? await Task.sleep(for: .milliseconds(50))
+            harness.eval("c.show(0.05)")
+            try? await Task.sleep(for: .milliseconds(400))
+            #expect(c?.isShowing() == true)
+            #expect(c?.windowAlphaValue == 0.7)
+            harness.eval("c.destroy()")
+        }
+
+        @Test("hide() during a fade-in hides at once, and the next show() is at the canvas's alpha")
+        func hideDuringFadeIn() async {
+            let harness = makeHarness()
+            harness.eval("var c = hs.canvas.create({x: 0, y: 0, w: 50, h: 50}).setAlpha(0.9).show(0.2); c.hide()")
+            let c = canvas(harness)
+            #expect(c?.isShowing() == false)
+            try? await Task.sleep(for: .milliseconds(300))
+            harness.eval("c.show()")
+            #expect(c?.windowAlphaValue == 0.9)
+            harness.eval("c.destroy()")
+        }
+
+        @Test("destroy(t) fades out before tearing the window down")
+        func destroyFadesOut() async {
+            let harness = makeHarness()
+            harness.eval("var c = hs.canvas.create({x: 0, y: 0, w: 50, h: 50}).show(); c.destroy(0.1)")
+            let c = canvas(harness)
+            #expect(c?.isShowing() == true, "The canvas stays on screen while it fades")
+            #expect(await harness.waitForAsync(timeout: 1.0) { c?.isShowing() == false })
+            #expect(c?.windowAlphaValue == nil, "The window is released once the fade ends")
+        }
+
+        @Test("A canvas fading out that nobody references stays alive until the fade ends, then is collected")
+        func fadingCanvasLifetime() async {
+            let harness = makeHarness()
+            weak var c: HSCanvas?
+            autoreleasepool {
+                harness.eval("var c = hs.canvas.create({x: 0, y: 0, w: 50, h: 50}).show(); c.hide(0.2); void 0")
+                c = canvas(harness)
+                harness.eval("c = null; void 0")
+            }
+            harness.collectGarbage()
+            #expect(c?.isShowing() == true, "A fading canvas must not be collected mid-fade")
+
+            #expect(await harness.waitForAsync(timeout: 1.0) { c?.isShowing() != true })
+            harness.collectGarbage()
+            #expect(c == nil, "A canvas that has faded out and that nobody references must be collected")
+        }
+    }
+
     // MARK: - Garbage collection (issue #267)
 
     @Test("A shown canvas the caller didn't keep stays on screen after garbage collection, and is collected once hidden")
@@ -627,7 +770,7 @@ struct HSCanvasTests {
         harness.collectGarbage()
         #expect(canvas?.isShowing() == true, "A shown canvas must not be collected")
 
-        _ = canvas?.hide()
+        _ = canvas?.hide(0)
         harness.collectGarbage()
         #expect(canvas == nil, "A hidden canvas nobody references must not be kept alive")
     }

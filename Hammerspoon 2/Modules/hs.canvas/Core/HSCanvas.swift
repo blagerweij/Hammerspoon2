@@ -30,24 +30,58 @@ import SwiftUI
 @objc protocol HSCanvasAPI: HSTypeAPI, JSExport {
     // MARK: Window lifecycle
 
-    /// Show the canvas window
+    /// Show the canvas window, optionally fading it in
+    ///
+    /// A fade goes from fully transparent up to the canvas's `alpha()`. Calling `show()`,
+    /// `hide()` or `destroy()` while a fade is running replaces that fade, so showing a
+    /// canvas that is fading out brings it back.
     /// - Note: A shown canvas stays on screen, with its callbacks, until it's hidden or destroyed, even if you don't keep a reference to it
+    /// - Parameter fadeInTime?: The number of seconds to fade the canvas in over. Defaults to `0`, which shows it immediately
     /// - Returns: Self for chaining
-    @objc func show() -> HSCanvas
+    /// - Example:
+    /// ```js
+    /// c.show(0.3)
+    /// ```
+    @objc(show:) func show(_ fadeInTime: Double) -> HSCanvas
 
-    /// Hide the canvas window (elements and window config are preserved while you keep a reference to it)
+    /// Hide the canvas window, optionally fading it out (elements and window config are preserved while you keep a reference to it)
+    ///
+    /// The canvas keeps its callbacks, and `isShowing()` stays `true`, until a fade-out
+    /// has finished. Afterwards its `alpha()` is unchanged, so the next `show()` brings it
+    /// back at the same opacity.
+    /// - Parameter fadeOutTime?: The number of seconds to fade the canvas out over. Defaults to `0`, which hides it immediately
     /// - Returns: Self for chaining
-    @objc func hide() -> HSCanvas
+    /// - Example:
+    /// ```js
+    /// c.hide(0.3)
+    /// ```
+    @objc(hide:) func hide(_ fadeOutTime: Double) -> HSCanvas
 
-    /// Destroy the canvas window and release its resources
+    /// Destroy the canvas window and release its resources, optionally fading it out first
     ///
     /// Named `destroy()` rather than v1's `delete()` -- `delete` cannot be used as a
     /// JavaScriptCore-exported method name in this codebase's bridging layer.
+    /// - Parameter fadeOutTime?: The number of seconds to fade the canvas out over before destroying it. Defaults to `0`, which destroys it immediately
     /// - Example:
     /// ```js
-    /// c.destroy()
+    /// c.destroy(0.3)
     /// ```
-    @objc func destroy()
+    @objc(destroy:) func destroy(_ fadeOutTime: Double)
+
+    /// The opacity of the canvas window
+    /// - Returns: The opacity, from `0` (fully transparent) to `1` (fully opaque)
+    @objc func alpha() -> Double
+
+    /// Set the opacity of the whole canvas window
+    ///
+    /// This is the opacity `show()` fades in to, and that a hidden canvas comes back at.
+    /// - Parameter alpha: The opacity, from `0` (fully transparent) to `1` (fully opaque). Values outside that range are clamped
+    /// - Returns: Self for chaining
+    /// - Example:
+    /// ```js
+    /// c.setAlpha(0.5)
+    /// ```
+    @objc func setAlpha(_ alpha: Double) -> HSCanvas
 
     /// Whether the canvas window is currently ordered onto the screen
     /// - Returns: `true` if the canvas has been shown and not hidden or destroyed
@@ -411,6 +445,20 @@ import SwiftUI
 
     private let elementStore = CanvasElementStore()
 
+    // The opacity set by setAlpha(). Kept apart from the window's alphaValue, which is
+    // animated by fades and so can't be read back as the opacity to fade in to.
+    private var targetAlpha: CGFloat = 1
+
+    // Whether a hide()/destroy() fade is running, so setAlpha() doesn't interrupt it.
+    private var isFadingOut = false
+
+    // Bumped by every show()/hide()/destroy(), so a fade's completion handler can tell
+    // that a later call has replaced it and must do nothing.
+    private var fadeGeneration = 0
+
+    /// The window's actual alphaValue, for tests -- not exposed to JS.
+    var windowAlphaValue: CGFloat? { nsWindow?.alphaValue }
+
     private var windowLevelRaw: Int?
     private var windowBehaviorRaw: NSWindow.CollectionBehavior = []
     private var isClickActivating = true
@@ -453,7 +501,7 @@ import SwiftUI
 
     // MARK: - Lifecycle
 
-    @objc func show() -> HSCanvas {
+    @objc(show:) func show(_ fadeInTime: Double) -> HSCanvas {
         if nsWindow == nil {
             let content = HSCanvasRenderView(store: elementStore) { [weak self] message, id, x, y in
                 guard let self else { return }
@@ -490,20 +538,40 @@ import SwiftUI
 
             self.nsWindow = window
         }
+        guard let window = nsWindow else { return self }
 
-        nsWindow?.makeKeyAndOrderFront(nil)
-        nsWindow?.orderFrontRegardless()
+        fadeGeneration += 1
+        isFadingOut = false
+        let duration = Self.fadeDuration(fadeInTime)
+        if duration > 0 && !window.isVisible {
+            window.alphaValue = 0
+        }
+        window.makeKeyAndOrderFront(nil)
+        window.orderFrontRegardless()
         isShown = true
+        animateAlpha(to: targetAlpha, over: duration) {}
         return self
     }
 
-    @objc func hide() -> HSCanvas {
-        nsWindow?.orderOut(nil)
-        isShown = false
+    @objc(hide:) func hide(_ fadeOutTime: Double) -> HSCanvas {
+        fadeOut(over: Self.fadeDuration(fadeOutTime)) { [weak self] in
+            guard let self else { return }
+            self.nsWindow?.orderOut(nil)
+            self.nsWindow?.alphaValue = self.targetAlpha
+            self.isShown = false
+        }
         return self
     }
 
-    @objc func destroy() {
+    @objc(destroy:) func destroy(_ fadeOutTime: Double) {
+        fadeOut(over: Self.fadeDuration(fadeOutTime)) { [weak self] in
+            self?.destroy()
+        }
+    }
+
+    func destroy() {
+        fadeGeneration += 1
+        isFadingOut = false
         mouseCallbackRef?.detach(from: self)
         mouseCallbackRef = nil
         draggingCallbackRef?.detach(from: self)
@@ -514,6 +582,70 @@ import SwiftUI
         window.contentView = nil
         window.close()
         nsWindow = nil
+    }
+
+    @objc func alpha() -> Double {
+        Double(targetAlpha)
+    }
+
+    @objc func setAlpha(_ alpha: Double) -> HSCanvas {
+        guard !alpha.isNaN else {
+            AKWarning("hs.canvas: setAlpha() needs a number")
+            return self
+        }
+        targetAlpha = CGFloat(min(max(alpha, 0), 1))
+        // A fade-out keeps going, and its completion restores targetAlpha; anything else
+        // (including a fade-in) jumps straight to the new opacity.
+        if !isFadingOut {
+            animateAlpha(to: targetAlpha, over: 0) {}
+        }
+        return self
+    }
+
+    // MARK: - Fading
+
+    /// Fades the window out and then runs `completion`, unless a later show()/hide()/destroy()
+    /// replaces the fade first. The canvas stays active (and so alive, with its callbacks)
+    /// until `completion` makes it inactive, matching v1, which held a reference during fades.
+    private func fadeOut(over duration: TimeInterval, completion: @escaping @MainActor () -> Void) {
+        fadeGeneration += 1
+        guard duration > 0, let window = nsWindow, window.isVisible else {
+            isFadingOut = false
+            // Settle any running fade-in, so the window is at targetAlpha the next time it's shown.
+            animateAlpha(to: targetAlpha, over: 0) {}
+            completion()
+            return
+        }
+        let generation = fadeGeneration
+        isFadingOut = true
+        animateAlpha(to: 0, over: duration) { [weak self] in
+            guard let self, self.fadeGeneration == generation else { return }
+            self.isFadingOut = false
+            completion()
+        }
+    }
+
+    /// Animates the window's alphaValue, replacing any animation already running on it.
+    private func animateAlpha(to alpha: CGFloat, over duration: TimeInterval,
+                              completion: @escaping @MainActor () -> Void) {
+        guard let window = nsWindow else {
+            completion()
+            return
+        }
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = duration
+            window.animator().alphaValue = alpha
+        } completionHandler: {
+            MainActor.assumeIsolated { completion() }
+        }
+        if duration <= 0 {
+            window.alphaValue = alpha
+        }
+    }
+
+    /// A fade time from JS: an omitted argument arrives as NaN, which means no fade.
+    private static func fadeDuration(_ seconds: Double) -> TimeInterval {
+        seconds.isFinite && seconds > 0 ? seconds : 0
     }
 
     @objc func isShowing() -> Bool {
@@ -844,6 +976,7 @@ import SwiftUI
         copy.isClickActivating = isClickActivating
         copy.ignoresMouseEventsFlag = ignoresMouseEventsFlag
         copy.accessibilitySubroleValue = accessibilitySubroleValue
+        copy.targetAlpha = targetAlpha
         return copy
     }
 
