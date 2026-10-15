@@ -413,6 +413,7 @@ struct HSHTTPTests {
                 let port = h.eval("server.getPort()") as? Int ?? 0
                 return port > 0
             }
+            #expect(portReady, "Server should start and assign a port")
             guard portReady else { h.eval("server.stop()"); return }
 
             h.eval("hs.http.get('http://localhost:' + server.getPort() + '/search?q=a+b%26c&tag=x&tag=y&flag')")
