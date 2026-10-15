@@ -772,6 +772,121 @@ struct HSUIWebViewTests {
         }
     }
 
+    // MARK: - Script Results
+
+    /// Like the page message tests, these use a WebPage with no window.
+    @Suite("Script results")
+    struct ScriptResultTests {
+
+        /// A harness with `wv`, a web view that has loaded a page titled "T1", and
+        /// `evalInPage(script)`, which runs `script` with `evalJSResult()` and stores what its
+        /// callback receives in `got`, as `{result, error}`.
+        private func makeHarness() async -> JSTestHarness {
+            let harness = JSTestHarness()
+            harness.loadModule(HSUIModule.self, as: "ui")
+            harness.eval("""
+                var wv = hs.ui.webview().loadHTML("<title>T1</title><body><p>hi</p></body>")
+                var got = null
+                function evalInPage(script) {
+                    got = null
+                    wv.evalJSResult(script, (result, error) => { got = {result: result, error: error} })
+                }
+                """)
+            let loaded = await harness.waitForAsync(timeout: 5.0) { harness.evalString("wv.title") == "T1" }
+            #expect(loaded)
+            return harness
+        }
+
+        /// Runs `script` in the page and returns what the callback got, as JSON
+        private func evalInPage(_ harness: JSTestHarness, _ script: String) async -> String? {
+            harness.eval("evalInPage(\(jsStringLiteral(script)))")
+            #expect(!harness.hasException)
+            let calledBack = await harness.waitForAsync(timeout: 5.0) { harness.evalBool("got !== null") == true }
+            #expect(calledBack, "evalJSResult never called back for: \(script)")
+            return harness.evalString("JSON.stringify(got)")
+        }
+
+        private func jsStringLiteral(_ string: String) -> String {
+            let data = try! JSONSerialization.data(withJSONObject: string, options: .fragmentsAllowed)
+            return String(decoding: data, as: UTF8.self)
+        }
+
+        @Test("A script that returns a value delivers it, with a null error")
+        func testReturnedValue() async {
+            let harness = await makeHarness()
+            #expect(await evalInPage(harness, "return document.title") == #"{"result":"T1","error":null}"#)
+            #expect(await evalInPage(harness, "return 1 + 1") == #"{"result":2,"error":null}"#)
+        }
+
+        @Test("A bare expression is not returned, so the result is null")
+        func testBareExpressionIsNull() async {
+            let harness = await makeHarness()
+            #expect(await evalInPage(harness, "document.title") == #"{"result":null,"error":null}"#)
+            #expect(await evalInPage(harness, "1 + 1") == #"{"result":null,"error":null}"#)
+        }
+
+        @Test("Returning undefined gives a null result")
+        func testUndefinedIsNull() async {
+            let harness = await makeHarness()
+            #expect(await evalInPage(harness, "return undefined") == #"{"result":null,"error":null}"#)
+        }
+
+        @Test("Several statements run, and the returned value is delivered")
+        func testStatements() async {
+            let harness = await makeHarness()
+            let script = """
+                const p = document.querySelector("p")
+                p.textContent = "changed"
+                return p.textContent.length
+                """
+            #expect(await evalInPage(harness, script) == #"{"result":7,"error":null}"#)
+        }
+
+        @Test("Arrays and plain objects are copied out of the page")
+        func testStructuredResult() async {
+            let harness = await makeHarness()
+            #expect(await evalInPage(harness, "return {name: document.title, list: [1, 'two', true, null]}")
+                    == #"{"result":{"name":"T1","list":[1,"two",true,null]},"error":null}"#)
+        }
+
+        @Test("The script can await, and a returned Promise delivers what it resolves to")
+        func testAwait() async {
+            let harness = await makeHarness()
+            let awaited = "const v = await new Promise(r => setTimeout(() => r(20), 10)); return v + 1"
+            #expect(await evalInPage(harness, awaited) == #"{"result":21,"error":null}"#)
+            #expect(await evalInPage(harness, "return Promise.resolve('later')") == #"{"result":"later","error":null}"#)
+        }
+
+        @Test("A thrown error or rejected Promise is delivered as the page's own error message, with a null result",
+              arguments: [
+                ("throw new Error('boom')", "Error: boom"),
+                ("return Promise.reject(new TypeError('nope'))", "TypeError: nope"),
+                ("throw 'a plain string'", "a plain string"),
+              ])
+        func testErrors(script: String, message: String) async {
+            let harness = await makeHarness()
+            let got = await evalInPage(harness, script)
+            #expect(got == #"{"result":null,"error":\#(jsStringLiteral(message))}"#)
+        }
+
+        @Test("A syntax error is delivered as the page's SyntaxError message")
+        func testSyntaxError() async {
+            let harness = await makeHarness()
+            _ = await evalInPage(harness, "return (")
+            #expect(harness.evalBool("got.result === null") == true)
+            let error = harness.evalString("got.error") ?? ""
+            // The rest of the message depends on how WebKit wraps the script in a function
+            #expect(error.hasPrefix("SyntaxError: "), "got \(error)")
+        }
+
+        @Test("A result that can't be copied out of the page, such as a DOM element, is delivered as an error")
+        func testUncopyableResult() async {
+            let harness = await makeHarness()
+            let got = await evalInPage(harness, "return document.body")
+            #expect(got == #"{"result":null,"error":"JavaScript execution returned a result of an unsupported type"}"#)
+        }
+    }
+
     // MARK: - Memory Leak Tests
     //
     // UIWebView is embedded into a window's element tree (not registered in a strong

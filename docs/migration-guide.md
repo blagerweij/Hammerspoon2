@@ -560,7 +560,10 @@ Where each v1 module's job landed:
   `.hstack()`.
 - **`hs.webview`** → `hs.ui.webview()`, embedded into a window with `.webview(wv)`. Requires
   macOS 26+ (built on SwiftUI's `WebView`, not raw `WKWebView`). `evaluateJavaScript()`
-  becomes `.execJS()` (fire-and-forget) or `.evalJSResult()` (callback with a result). A
+  becomes `.execJS()` (fire-and-forget) or `.evalJSResult()` (callback with a result). Both
+  run the script as the body of an async function, not as an expression, so to get a value
+  back you must `return` it: v1's `evaluateJavaScript("document.title", fn)` becomes
+  `.evalJSResult("return document.title", fn)` (without the `return`, the result is `null`). A
   built-in `.toolbar([...])` exists, but only for standard nav items and custom buttons.
   **Important:** registering `onLoadChange`/`onNavigate`/`onTitleChange` callbacks disables
   automatic garbage-collection cleanup of the webview — call `.destroy()` explicitly when

@@ -217,8 +217,8 @@ final class UIWebViewToolbarEntry: Identifiable {
 /// // Fire and forget
 /// wv.execJS("document.body.style.backgroundColor = 'lightyellow'")
 ///
-/// // With result (note the JS method name is evalJSResult)
-/// wv.evalJSResult("document.title", (result, error) => {
+/// // With result (note the JS method name is evalJSResult, and the script must `return` its value)
+/// wv.evalJSResult("return document.title", (result, error) => {
 ///     if (error) { console.log("Error: " + error) }
 ///     else { console.log("Title: " + result) }
 /// })
@@ -515,7 +515,10 @@ final class UIWebViewToolbarEntry: Identifiable {
     // MARK: JavaScript Execution
 
     /// Execute JavaScript in the web page without capturing the result
-    /// - Parameter script: The JavaScript code to execute
+    ///
+    /// The script runs as the body of an async function, so it can use `await`.
+    ///
+    /// - Parameter script: The JavaScript function body to execute
     /// - Returns: Self for chaining
     /// - Example:
     /// ```js
@@ -528,15 +531,34 @@ final class UIWebViewToolbarEntry: Identifiable {
     /// The JavaScript method name is `evalJSResult` — it derives from the internal
     /// Objective-C selector `evalJS:result:`.
     ///
-    /// - Parameter script: The JavaScript expression to evaluate
+    /// The script is not evaluated as an expression: it runs as the body of an async
+    /// function, and the result is the value it returns. Use `return` to send a value
+    /// back — a script without one, such as `"document.title"`, gives a result of `null`.
+    /// Because the function is async, the script can use `await`, and if it returns a
+    /// Promise the callback gets the value the Promise resolves to.
+    ///
+    /// The result is copied out of the page, so it must be a number, string, boolean,
+    /// array, plain object, `null` or `undefined` (which arrives as `null`). Anything else,
+    /// such as a DOM element or a function, is delivered as an error.
+    ///
+    /// If the script throws, or returns a Promise that rejects, the error is the page's own
+    /// message for it, such as `"Error: boom"` or `"SyntaxError: Unexpected token '}'"`.
+    ///
+    /// - Parameter script: The JavaScript function body to run, which should `return` the result
     /// - Parameter callback: {(result: any, error: string | null) => void} Called with the result or an error message
     /// - Returns: Self for chaining
     /// - Example:
     /// ```js
-    /// wv.evalJSResult("document.title", (result, error) => {
+    /// wv.evalJSResult("return document.title", (result, error) => {
     ///     if (error) { console.log("Error: " + error) }
     ///     else { console.log("Title: " + result) }
     /// })
+    ///
+    /// // Statements and await work too
+    /// wv.evalJSResult(`
+    ///     const response = await fetch("/api/status")
+    ///     return (await response.json()).state
+    /// `, (result, error) => console.log(result))
     /// ```
     @objc(evalJS:result:)
     func evalJSResult(_ script: String, _ callback: JSFunction) -> UIWebView
@@ -910,7 +932,7 @@ final class UIWebViewToolbarEntry: Identifiable {
             do {
                 _ = try await self.page.callJavaScript(script, arguments: [:])
             } catch {
-                AKError("hs.ui.webview.execJS: \(error.localizedDescription)")
+                AKError("hs.ui.webview.execJS: \(Self.pageErrorMessage(from: error))")
             }
         }
         return self
@@ -929,10 +951,23 @@ final class UIWebViewToolbarEntry: Identifiable {
                 let result = try await self.page.callJavaScript(script, arguments: [:])
                 _ = capturedCallback.call(withArguments: [result as Any, NSNull()])
             } catch {
-                _ = capturedCallback.call(withArguments: [NSNull(), error.localizedDescription])
+                _ = capturedCallback.call(withArguments: [NSNull(), Self.pageErrorMessage(from: error)])
             }
         }
         return self
+    }
+
+    /// The message of an error thrown by a script run in the page, such as "Error: boom". For an
+    /// exception, WebKit's own description is just "A JavaScript exception occurred"; the page's
+    /// message is only in the userInfo, under a key WebKit doesn't publish a constant for.
+    private static func pageErrorMessage(from error: Error) -> String {
+        let error = error as NSError
+        if error.domain == WKErrorDomain,
+           error.code == WKError.javaScriptExceptionOccurred.rawValue,
+           let message = error.userInfo["WKJavaScriptExceptionMessage"] as? String {
+            return message
+        }
+        return error.localizedDescription
     }
 
     // MARK: Private Observation
