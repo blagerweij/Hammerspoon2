@@ -97,19 +97,24 @@ import UniformTypeIdentifiers
 
     /// Set the request handler callback.
     ///
-    /// The callback receives `(method, path, headers, body)` and must return either:
+    /// The callback receives `(method, path, headers, body, query)` and must return either:
     /// - A plain object `{body, status, headers}` for a synchronous response.
     /// - A Promise resolving to `{body, status, headers}` for an async response.
+    ///
+    /// `path` excludes the query string. `query` is an object of decoded query parameters: a name
+    /// that appears once maps to a string, a name that appears more than once maps to an array of
+    /// strings. It is `{}` when the request has no query string.
     ///
     /// If the callback returns `null` or `undefined`, the server falls through to static file serving
     /// (if a document root is set), or responds with 404.
     ///
-    /// - Parameter callback: {((method: string, path: string, headers: object, body: string) => ({body: string, status: number, headers: object} | Promise<{body: string, status: number, headers: object}>)) | null} The request handler, or `null` to clear.
+    /// - Parameter callback: {((method: string, path: string, headers: object, body: string, query: {[name: string]: string | string[]}) => ({body: string, status: number, headers: object} | Promise<{body: string, status: number, headers: object}>)) | null} The request handler, or `null` to clear.
     /// - Returns: This server, for chaining.
     /// - Example:
     /// ```js
-    /// server.setCallback((method, path, headers, body) => {
-    ///     return {body: "<h1>Hello!</h1>", status: 200, headers: {"Content-Type": "text/html"}}
+    /// server.setCallback((method, path, headers, body, query) => {
+    ///     // GET /greet?name=Ada&tag=a&tag=b → query = {name: "Ada", tag: ["a", "b"]}
+    ///     return {body: `<h1>Hello ${query.name ?? "there"}!</h1>`, status: 200, headers: {"Content-Type": "text/html"}}
     /// })
     /// ```
     @objc @discardableResult func setCallback(_ callback: JSFunction?) -> HSHTTPServer
@@ -551,6 +556,30 @@ struct ParsedHTTPRequest {
         return ParsedHTTPRequest(method: method, path: path, query: query, headers: headers, body: body)
     }
 
+    /// Decode a query string into `[name: value]`, where a name that occurs more than once
+    /// maps to an array of its values in order. `+` is decoded as a space (form encoding).
+    static func parseQueryParameters(_ query: String?) -> [String: Any] {
+        guard let query, !query.isEmpty else { return [:] }
+        // Split by hand: URLComponents.percentEncodedQuery traps on malformed client input like "%zz".
+        func decode(_ s: Substring) -> String {
+            let spaced = s.replacingOccurrences(of: "+", with: " ")
+            return spaced.removingPercentEncoding ?? spaced
+        }
+        var params: [String: Any] = [:]
+        for pair in query.split(separator: "&") {
+            let kv = pair.split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false)
+            let name = decode(kv[0])
+            let value = kv.count > 1 ? decode(kv[1]) : ""
+            switch params[name] {
+            case nil: params[name] = value
+            case let existing as String: params[name] = [existing, value]
+            case let existing as [String]: params[name] = existing + [value]
+            default: break
+            }
+        }
+        return params
+    }
+
     // MARK: - Request dispatching
 
     private func handleRequest(_ request: ParsedHTTPRequest, on connection: NWConnection) {
@@ -573,7 +602,8 @@ struct ParsedHTTPRequest {
                 request.method,
                 request.path,
                 request.headers as [String: Any],
-                request.body
+                request.body,
+                Self.parseQueryParameters(request.query)
             ])
 
             // Check if result is a thenable (Promise)

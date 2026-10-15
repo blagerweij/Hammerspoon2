@@ -392,6 +392,46 @@ struct HSHTTPTests {
             #expect(ok)
         }
 
+        @Test("query parameters are delivered to callback")
+        func testQueryParameters() async {
+            let h = makeHarness()
+            var sawQuery = false
+
+            h.eval("""
+            var server = hs.httpserver.create()
+                .setPort(0)
+                .setCallback((method, path, headers, body, query) => {
+                    if (path === '/search' && query.q === 'a b&c' && JSON.stringify(query.tag) === '["x","y"]' && query.flag === '')
+                        __test_callback('queryok')
+                    return {body: "ok", status: 200, headers: {}}
+                })
+                .start()
+        """)
+            h.registerCallback("queryok") { sawQuery = true }
+
+            let portReady = await h.waitForAsync(timeout: 2.0) {
+                let port = h.eval("server.getPort()") as? Int ?? 0
+                return port > 0
+            }
+            guard portReady else { h.eval("server.stop()"); return }
+
+            h.eval("hs.http.get('http://localhost:' + server.getPort() + '/search?q=a+b%26c&tag=x&tag=y&flag')")
+            let ok = await h.waitForAsync(timeout: 3.0) { sawQuery }
+            h.eval("server.stop()")
+            #expect(ok, "Callback should receive decoded query parameters")
+        }
+
+        @Test("parseQueryParameters handles empty, repeated and malformed input")
+        func testParseQueryParameters() {
+            #expect(HSHTTPServer.parseQueryParameters(nil).isEmpty)
+            #expect(HSHTTPServer.parseQueryParameters("").isEmpty)
+            let p = HSHTTPServer.parseQueryParameters("a=1&b=2&a=3&a=4&bad=%zz&e=x=y")
+            #expect(p["a"] as? [String] == ["1", "3", "4"])
+            #expect(p["b"] as? String == "2")
+            #expect(p["bad"] as? String == "%zz")
+            #expect(p["e"] as? String == "x=y")
+        }
+
         @Test("server returns 401 when password is set and auth header is missing")
         func testBasicAuthRequired() async {
             let h = makeHarness()
