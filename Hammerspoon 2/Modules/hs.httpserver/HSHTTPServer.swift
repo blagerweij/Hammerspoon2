@@ -565,19 +565,12 @@ struct ParsedHTTPRequest {
             let spaced = s.replacingOccurrences(of: "+", with: " ")
             return spaced.removingPercentEncoding ?? spaced
         }
-        var params: [String: Any] = [:]
+        var values: [String: [String]] = [:]
         for pair in query.split(separator: "&") {
             let kv = pair.split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false)
-            let name = decode(kv[0])
-            let value = kv.count > 1 ? decode(kv[1]) : ""
-            switch params[name] {
-            case nil: params[name] = value
-            case let existing as String: params[name] = [existing, value]
-            case let existing as [String]: params[name] = existing + [value]
-            default: break
-            }
+            values[decode(kv[0]), default: []].append(kv.count > 1 ? decode(kv[1]) : "")
         }
-        return params
+        return values.mapValues { $0.count == 1 ? $0[0] as Any : $0 }
     }
 
     // MARK: - Request dispatching
