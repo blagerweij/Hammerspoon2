@@ -719,6 +719,30 @@ struct HSCanvasTests {
             harness.eval("c.destroy()")
         }
 
+        @Test("setAlpha() during a fade-out lets the fade finish, and the next show() uses the new opacity")
+        func setAlphaDuringFadeOut() async {
+            let harness = makeHarness()
+            harness.eval("var c = hs.canvas.create({x: 0, y: 0, w: 50, h: 50}).show(); c.hide(0.2); c.setAlpha(0.3)")
+            let c = canvas(harness)
+            #expect(c?.isShowing() == true, "Changing the opacity doesn't cut the fade-out short")
+            #expect(await harness.waitForAsync(timeout: 1.0) { c?.isShowing() == false })
+            harness.eval("c.show()")
+            #expect(c?.windowAlphaValue == 0.3)
+            harness.eval("c.destroy()")
+        }
+
+        @Test("setAlpha() during a fade-in jumps to the new opacity and keeps it after the fade would have ended")
+        func setAlphaDuringFadeIn() async {
+            let harness = makeHarness()
+            harness.eval("var c = hs.canvas.create({x: 0, y: 0, w: 50, h: 50}).show(0.2); c.setAlpha(0.3)")
+            let c = canvas(harness)
+            #expect(c?.windowAlphaValue == 0.3)
+            try? await Task.sleep(for: .milliseconds(300))
+            #expect(c?.windowAlphaValue == 0.3)
+            #expect(c?.isShowing() == true)
+            harness.eval("c.destroy()")
+        }
+
         @Test("destroy(t) fades out before tearing the window down")
         func destroyFadesOut() async {
             let harness = makeHarness()
