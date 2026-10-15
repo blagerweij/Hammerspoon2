@@ -199,9 +199,10 @@ private nonisolated func hasPhysicalMIDIDevice() -> Bool {
     MIDIGetNumberOfDevices() > 0
 }
 
-/// The name of a source owned by an online device's entity (e.g. an enabled IAC Driver bus),
-/// if there is one.
-private nonisolated func firstDeviceOwnedSourceName() -> String? {
+/// The names of every source owned by an online device's entities (e.g. each enabled IAC
+/// Driver bus, each port of a multi-port interface).
+private nonisolated func deviceOwnedSourceNames() -> [String] {
+    var names: [String] = []
     for deviceIndex in 0..<MIDIGetNumberOfDevices() {
         let device = MIDIGetDevice(deviceIndex)
         var offline: Int32 = 0
@@ -209,15 +210,16 @@ private nonisolated func firstDeviceOwnedSourceName() -> String? {
         guard offline == 0 else { continue }
         for entityIndex in 0..<MIDIDeviceGetNumberOfEntities(device) {
             let entity = MIDIDeviceGetEntity(device, entityIndex)
-            guard MIDIEntityGetNumberOfSources(entity) > 0 else { continue }
-            var name: Unmanaged<CFString>?
-            if MIDIObjectGetStringProperty(MIDIEntityGetSource(entity, 0), kMIDIPropertyName, &name) == noErr,
-               let name = name?.takeRetainedValue() as String?, !name.isEmpty {
-                return name
+            for sourceIndex in 0..<MIDIEntityGetNumberOfSources(entity) {
+                var name: Unmanaged<CFString>?
+                if MIDIObjectGetStringProperty(MIDIEntityGetSource(entity, sourceIndex), kMIDIPropertyName, &name) == noErr,
+                   let name = name?.takeRetainedValue() as String?, !name.isEmpty {
+                    names.append(name)
+                }
             }
         }
     }
-    return nil
+    return names
 }
 
 // MARK: - Test suite
@@ -801,15 +803,20 @@ struct HSMIDITests {
     // v1 (#275). Tests can't create device-owned endpoints (that needs a MIDI driver), so this
     // only runs where one already exists.
     @Test("virtualSources lists each port owned by a device, and each can be opened",
-          .enabled(if: firstDeviceOwnedSourceName() != nil, "No online MIDI device with a source port"))
-    func testDeviceOwnedPortsAreListed() throws {
-        let portName = try #require(firstDeviceOwnedSourceName())
+          .enabled(if: !deviceOwnedSourceNames().isEmpty, "No online MIDI device with a source port"))
+    func testDeviceOwnedPortsAreListed() {
         let harness = JSTestHarness()
         harness.loadModule(HSMIDIModule.self, as: "midi")
-        harness.expectTrue("hs.midi.virtualSources().includes('\(portName)')")
-        harness.eval("var d = hs.midi.virtualSourceNamed('\(portName)')")
-        harness.expectTrue("d !== null && d !== undefined")
-        harness.eval("d.destroy()")
+        // Port names are user-editable, so they go through the bridge rather than into JS source.
+        harness.context.setObject(deviceOwnedSourceNames(), forKeyedSubscript: "portNames" as NSString)
+        harness.expectEqual("portNames.filter(n => !hs.midi.virtualSources().includes(n)).length", 0)
+        harness.expectEqual("""
+            portNames.filter(n => {
+                const d = hs.midi.virtualSourceNamed(n)
+                if (d) d.destroy()
+                return !d
+            }).length
+            """, 0)
     }
 
     // MARK: - Physical device tests (require a real, connected MIDI device)
