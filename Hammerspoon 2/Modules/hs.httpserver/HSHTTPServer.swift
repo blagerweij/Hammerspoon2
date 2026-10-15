@@ -114,7 +114,7 @@ import UniformTypeIdentifiers
     /// ```js
     /// server.setCallback((method, path, headers, body, query) => {
     ///     // GET /greet?name=Ada&tag=a&tag=b → query = {name: "Ada", tag: ["a", "b"]}
-    ///     return {body: `<h1>Hello ${query.name ?? "there"}!</h1>`, status: 200, headers: {"Content-Type": "text/html"}}
+    ///     return {body: `Hello ${query.name ?? "there"}!`, status: 200, headers: {"Content-Type": "text/plain; charset=utf-8"}}
     /// })
     /// ```
     @objc @discardableResult func setCallback(_ callback: JSFunction?) -> HSHTTPServer
