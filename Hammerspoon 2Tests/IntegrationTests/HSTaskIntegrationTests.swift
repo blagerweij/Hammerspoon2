@@ -123,6 +123,7 @@ import JavaScriptCore
         let success = await harness.waitForAsync(timeout: 2.0) { stdoutReceived }
         #expect(success, "Should receive stdout output")
         #expect(capturedOutput.contains("Hello from stdout"), "Output should contain expected text")
+        #expect(await harness.waitForTasksToComplete(), "The task should finish")
     }
 
     @Test("Task captures stderr via streaming callback")
@@ -153,11 +154,9 @@ import JavaScriptCore
         """)
 
         let success = await harness.waitForAsync(timeout: 2.0) { stderrReceived }
-        harness.eval("""
-            task.terminate();
-            """)
         #expect(success, "Should receive stderr output")
         #expect(capturedError.contains("Error message"), "Error output should contain expected text")
+        #expect(await harness.waitForTasksToComplete(), "The task should finish")
     }
 
     // MARK: - Task State Tests
@@ -359,7 +358,8 @@ import JavaScriptCore
 
         // Cleanup
         harness.eval("if (task.isRunning) task.terminate()")
-        try? await Task.sleep(for: .seconds(0.1))
+        // terminate() only signals the process: wait for its termination to be delivered
+        #expect(await harness.waitForTasksToComplete(), "The task should finish")
     }
 
     // MARK: - stdin Tests
@@ -396,7 +396,7 @@ import JavaScriptCore
 
         // Cleanup
         harness.eval("task.closeInput()")
-        try? await Task.sleep(for: .seconds(0.2))
+        #expect(await harness.waitForTasksToComplete(), "The task should finish")
     }
 
     @Test("closeInput closes stdin and signals EOF")
@@ -455,11 +455,9 @@ import JavaScriptCore
         """)
 
         let success = await harness.waitForAsync(timeout: 2.0) { outputReceived }
-        harness.eval("""
-            task.terminate();
-            """)
         #expect(success, "Should receive output")
         #expect(capturedOutput.contains("CustomValue123"), "Should see custom environment variable value")
+        #expect(await harness.waitForTasksToComplete(), "The task should finish")
     }
 
     @Test("Task respects custom working directory")
@@ -491,6 +489,7 @@ import JavaScriptCore
         let success = await harness.waitForAsync(timeout: 2.0) { outputReceived }
         #expect(success, "Should receive output")
         #expect(capturedPath.trimmingCharacters(in: .whitespacesAndNewlines) == "/private/tmp", "Working directory should be /private/tmp")
+        #expect(await harness.waitForTasksToComplete(), "The task should finish")
     }
 
     @Test("Cannot modify environment after task starts")
@@ -613,6 +612,7 @@ import JavaScriptCore
         let success = await harness.waitForAsync(timeout: 2.0) { streamingFired }
         #expect(success, "Streaming callback should fire")
         #expect(streamedData.contains("Streaming test"), "Should stream output")
+        #expect(await harness.waitForTasksToComplete(), "The task should finish")
     }
 
     @Test("hs.task.runAsync() supports workingDirectory option")
@@ -928,6 +928,7 @@ import JavaScriptCore
         let success = await harness.waitForAsync(timeout: 2.0) { streamingFired }
         #expect(success, "Builder streaming should fire")
         #expect(streamedData.contains("builder output test"), "Should stream builder output")
+        #expect(await harness.waitForTasksToComplete(), "The task should finish")
     }
 
     @Test("TaskBuilder.build() creates task without running")
@@ -1121,7 +1122,7 @@ import JavaScriptCore
         #expect(lines.count >= 3, "Should have at least 3 lines of output")
 
         harness.eval("interactiveTask.closeInput()")
-        try? await Task.sleep(for: .seconds(0.2))
+        #expect(await harness.waitForTasksToComplete(), "The task should finish")
     }
 
     @Test("Timeout pattern with task termination works")
