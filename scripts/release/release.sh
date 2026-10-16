@@ -290,9 +290,12 @@ for other_tag in $(git tag --points-at HEAD); do
         && die "HEAD is already released as $other_tag, and a second release from the same commit would reuse its build number"
 done
 BUILD_NUMBER="$(git rev-list --count HEAD)"
-git fetch --quiet origin gh-pages 2>/dev/null || true
-LIVE_BUILD="$(git show "origin/gh-pages:$APPCAST_NAME" 2>/dev/null \
-    | sed -n 's:.*<sparkle\:version>\([0-9][0-9]*\)</sparkle\:version>.*:\1:p' | sort -n | tail -1)"
+LIVE_BUILD=""
+if git fetch --quiet origin gh-pages 2>/dev/null \
+    && git cat-file -e "origin/gh-pages:$APPCAST_NAME" 2>/dev/null; then
+    LIVE_BUILD="$(git show "origin/gh-pages:$APPCAST_NAME" \
+        | sed -n 's:.*<sparkle\:version>\([0-9][0-9]*\)</sparkle\:version>.*:\1:p' | sort -n | tail -1)"
+fi
 if [ -n "$LIVE_BUILD" ] && [ "$BUILD_NUMBER" -le "$LIVE_BUILD" ]; then
     die "build $BUILD_NUMBER is not newer than build $LIVE_BUILD in the live appcast, so Sparkle would ignore it"
 fi
