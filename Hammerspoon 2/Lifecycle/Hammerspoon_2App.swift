@@ -146,6 +146,11 @@ struct Hammerspoon_2App: App {
                 openWindow(id: "console")
             }
 
+            Button("Open Documentation") {
+                NSApplication.shared.activate(ignoringOtherApps: true)
+                JSEngine.shared.eval("hs.docs.show()")
+            }
+
             Divider()
 
             CheckForUpdatesView(updater: updaterController.updater)

@@ -430,7 +430,7 @@ import SwiftUI
     // views in it), until it's hidden, closed or destroyed, even if the user dropped their
     // reference to it. A hidden window nobody references can never be shown again, so it's
     // ordinary garbage.
-    private var isShown = false {
+    private(set) var isShown = false {
         didSet {
             module?.windows.setActive(self, isShown)
         }
