@@ -172,11 +172,11 @@ struct HSLocationTests {
         """)
             #expect(harness.evalTypeOf("rise") == "object")
             // Known: 1 Jan 2024 sunrise London ≈ 08:06 UTC
-            #expect(harness.evalInt("rise.getFullYear()") == 2024)
-            #expect(harness.evalInt("rise.getMonth()") == 0)
-            #expect(harness.evalInt("rise.getDate()") == 1)
-            #expect(harness.evalInt("rise.getHours()") == 8)
-            #expect(harness.evalInt("rise.getMinutes()") == 6)
+            #expect(harness.evalInt("rise.getUTCFullYear()") == 2024)
+            #expect(harness.evalInt("rise.getUTCMonth()") == 0)
+            #expect(harness.evalInt("rise.getUTCDate()") == 1)
+            #expect(harness.evalInt("rise.getUTCHours()") == 8)
+            #expect(harness.evalInt("rise.getUTCMinutes()") == 6)
             #expect(!harness.hasException)
         }
 
@@ -188,11 +188,11 @@ struct HSLocationTests {
         """)
             #expect(harness.evalTypeOf("set") == "object")
             // 1 Jan 2024 sunset London ≈ 16:01 UTC
-            #expect(harness.evalInt("set.getFullYear()") == 2024)
-            #expect(harness.evalInt("set.getMonth()") == 0)
-            #expect(harness.evalInt("set.getDate()") == 1)
-            #expect(harness.evalInt("set.getHours()") == 16)
-            #expect(harness.evalInt("set.getMinutes()") == 1)
+            #expect(harness.evalInt("set.getUTCFullYear()") == 2024)
+            #expect(harness.evalInt("set.getUTCMonth()") == 0)
+            #expect(harness.evalInt("set.getUTCDate()") == 1)
+            #expect(harness.evalInt("set.getUTCHours()") == 16)
+            #expect(harness.evalInt("set.getUTCMinutes()") == 1)
             #expect(!harness.hasException)
         }
 
