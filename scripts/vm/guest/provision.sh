@@ -73,6 +73,9 @@ for target in com.apple.finder com.apple.systemevents; do
     grant "$USER_TCC" kTCCServiceAppleEvents "$APP_ID" "$target"
     grant "$USER_TCC" kTCCServiceAppleEvents "$HELPER_ID" "$target"
 done
+# hs.shortcuts.list() asks Shortcuts Events. Without this the Automation prompt sits unanswered
+# and each list() waits out the 2-minute Apple Event timeout.
+grant "$USER_TCC" kTCCServiceAppleEvents "$APP_ID" com.apple.shortcuts.events
 for service in kTCCServiceCamera kTCCServiceMicrophone; do
     grant "$USER_TCC" "$service" "$APP_ID"
 done
@@ -109,6 +112,30 @@ os.makedirs(os.path.dirname(path), exist_ok=True)
 plistlib.dump(approvals, open(path, "wb"))
 print("seeded", ", ".join(sys.argv[1:]))
 EOF
+
+step "A shortcut"
+# The hs.shortcuts tests need at least one shortcut to check list()'s entries against. The
+# create-shortcut URL saves an empty "New Shortcut" without any clicks, even while the app's
+# "What's New" sheet is up (which is also why it's killed, not quit: the sheet cancels a quit).
+# A shortcut created during the app's very first launch was gone after the image was saved, so
+# the app gets a first launch of its own, and the shortcut must reach the database before the
+# image is saved.
+shortcuts_in_db() {
+    sqlite3 ~/Library/Shortcuts/Shortcuts.sqlite "select count(*) from ZSHORTCUT where ZTOMBSTONED = 0" 2>/dev/null || echo 0
+}
+if [[ "$(shortcuts_in_db)" == 0 ]]; then
+    open -a Shortcuts
+    sleep 10
+    killall Shortcuts 2>/dev/null || true
+    sleep 2
+    open "shortcuts://create-shortcut"
+    for _ in $(seq 60); do [[ "$(shortcuts_in_db)" != 0 ]] && break; sleep 0.5; done
+    sleep 5
+    killall Shortcuts 2>/dev/null || true
+    sleep 2
+    sync
+fi
+shortcuts list | grep . && [[ "$(shortcuts_in_db)" != 0 ]] || { echo "provision: no shortcut was created" >&2; exit 1; }
 
 step "Stamp"
 sudo tee /etc/hs2-golden.json >/dev/null <<EOF
