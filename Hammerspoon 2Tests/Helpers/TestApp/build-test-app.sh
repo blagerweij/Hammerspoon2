@@ -1,18 +1,23 @@
 #!/usr/bin/env bash
 #
 # Builds "Hammerspoon 2 Test App.app", the app the integration tests launch instead of Finder or
-# Chess (see TestApp.swift next to this script), and prints its path. Does nothing when it is up to date.
+# Chess (see TestApp.swift next to this script), into the given directory and prints its path.
+# Does nothing when it is up to date.
 #
 # An app bundle is only a folder with an executable and an Info.plist, so `swiftc` and a few
-# lines here are enough; there is no Xcode target for it. The tests run this script themselves
-# (TestAppControl.swift).
+# lines here are enough; there is no Xcode target for it. The test target's "Build Test App"
+# phase runs this script with $BUILT_PRODUCTS_DIR, so the app sits next to "Hammerspoon 2.app"
+# and travels with the build products (TestAppControl.swift looks for it there).
+#
+# Usage: build-test-app.sh <output directory>
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
-cd "$HERE/../../.."
+OUT="${1:?usage: build-test-app.sh <output directory>}"
+mkdir -p "$OUT"
 
 SOURCE="$HERE/TestApp.swift"
-APP_BUNDLE="build/testapp/Hammerspoon 2 Test App.app"
+APP_BUNDLE="$OUT/Hammerspoon 2 Test App.app"
 CONTENTS="$APP_BUNDLE/Contents"
 EXECUTABLE="$CONTENTS/MacOS/Hammerspoon2TestApp"
 
@@ -20,8 +25,9 @@ if [[ ! -x "$EXECUTABLE" || "$SOURCE" -nt "$EXECUTABLE" || "$0" -nt "$EXECUTABLE
     rm -rf "$APP_BUNDLE"
     mkdir -p "$CONTENTS/MacOS"
 
-    # Xcode's build settings in the environment (SDKROOT and friends) would mislead swiftc
-    env -i PATH="/usr/bin:/bin" HOME="$HOME" xcrun swiftc -O -parse-as-library -D TEST_APP "$SOURCE" -o "$EXECUTABLE" >&2
+    # Xcode's build settings in the environment (SDKROOT and friends) would mislead swiftc;
+    # DEVELOPER_DIR stays, so a build phase uses the Xcode that runs it
+    env -i PATH="/usr/bin:/bin" HOME="$HOME" ${DEVELOPER_DIR:+DEVELOPER_DIR="$DEVELOPER_DIR"} xcrun swiftc -O -parse-as-library -D TEST_APP "$SOURCE" -o "$EXECUTABLE" >&2
 
     cat > "$CONTENTS/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
@@ -47,6 +53,10 @@ if [[ ! -x "$EXECUTABLE" || "$SOURCE" -nt "$EXECUTABLE" || "$0" -nt "$EXECUTABLE
 </dict>
 </plist>
 PLIST
+
+    # A sealed ad-hoc signature, like the one hs2vm gives the main app; the linker's alone
+    # doesn't cover the Info.plist
+    codesign --force --sign - "$APP_BUNDLE" >&2
 fi
 
-echo "$PWD/$APP_BUNDLE"
+echo "$APP_BUNDLE"

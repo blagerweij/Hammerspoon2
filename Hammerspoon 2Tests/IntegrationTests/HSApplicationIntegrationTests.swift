@@ -383,7 +383,7 @@ struct HSApplicationTests {
     @Suite(
         "hs.application menu traversal tests", .serialized,
         .disabled(if: !AXIsProcessTrusted(), "Accessibility permission not granted"),
-        .enabled(if: TestAppControl.isAvailable, "The test app could not be built"), .testApp
+        .testApp
     )
     struct HSApplicationMenuTraversalTests {
 
@@ -623,7 +623,7 @@ struct HSApplicationTests {
 
     /// Tests that NSWorkspace application events are correctly delivered to JavaScript watcher callbacks.
     /// Uses the Hammerspoon 2 Test App (``TestAppControl``) as the target.
-    @Suite("hs.application watcher event delivery tests", .serialized, .enabled(if: TestAppControl.isAvailable, "The test app could not be built"))
+    @Suite("hs.application watcher event delivery tests", .serialized)
     struct HSApplicationWatcherEventTests {
 
         private func makeHarness() -> JSTestHarness {

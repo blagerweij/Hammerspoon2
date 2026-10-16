@@ -381,6 +381,7 @@
 				4F56418C2E8333840099EB4C /* Sources */,
 				4F56418D2E8333840099EB4C /* Frameworks */,
 				4F56418E2E8333840099EB4C /* Resources */,
+				4FA7E5D12F9A3B0C00C0FFEE /* Build Test App */,
 			);
 			buildRules = (
 			);
@@ -565,6 +566,27 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXShellScriptBuildPhase section */
+		4FA7E5D12F9A3B0C00C0FFEE /* Build Test App */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+				"$(SRCROOT)/Hammerspoon 2Tests/Helpers/TestApp/TestApp.swift",
+				"$(SRCROOT)/Hammerspoon 2Tests/Helpers/TestApp/build-test-app.sh",
+			);
+			name = "Build Test App";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+				"$(BUILT_PRODUCTS_DIR)/Hammerspoon 2 Test App.app/Contents/MacOS/Hammerspoon2TestApp",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "\"${SRCROOT}/Hammerspoon 2Tests/Helpers/TestApp/build-test-app.sh\" \"${BUILT_PRODUCTS_DIR}\"\n";
+		};
 		336D11A35383A7FA66D4E288 /* Generate API Documentation */ = {
 			isa = PBXShellScriptBuildPhase;
 			alwaysOutOfDate = 1;

@@ -698,7 +698,7 @@ Use the Hammerspoon 2 Test App through `TestAppControl` (`Hammerspoon 2Tests/Hel
 **A suite that only needs the app to be there** takes the `.testApp` trait: one copy runs for the whole suite (nested suites included) and `TestAppControl.pid` names it. Address it by pid, never by bundle ID: other suites run their own copies at the same time.
 
 ```swift
-@Suite("hs.foo element tests", .serialized, .enabled(if: TestAppControl.isAvailable, "The test app could not be built"), .testApp)
+@Suite("hs.foo element tests", .serialized, .testApp)
 struct HSFooElementTests {
     private func makeHarness() -> JSTestHarness {
         let harness = JSTestHarness()
@@ -725,4 +725,6 @@ let app = await TestAppControl.launch(detail: "Hides this app and waits for the 
 defer { app?.terminate() }
 ```
 
-`launch` returns once the app's window is on screen; `app.hide()` / `app.unhide()` work from then on. A listener for events of all apps (`didTerminate`) must filter by the pid of its own copy. `build-test-app.sh` in that folder builds the app with `swiftc` on first use; a new command for the app goes into `TestApp.swift` (`handleCommand`) and `TestAppControl`.
+`launch` returns once the app's window is on screen; `app.hide()` / `app.unhide()` work from then on. A listener for events of all apps (`didTerminate`) must filter by the pid of its own copy. The test target's "Build Test App" phase runs `build-test-app.sh` (in that folder) to build the app with `swiftc` into the build products, next to `Hammerspoon 2.app`, so it is there for `hs2vm test` and `test-without-building` too. A new command for the app goes into `TestApp.swift` (`handleCommand`) and `TestAppControl`.
+
+Put `.testApp` only on the suites that use the app, not on a module's top-level suite: a suite whose scope can't launch the app doesn't run, so tests that don't need it would go down with it. Don't guard these suites with `.enabled(if:)` either: a missing or broken test app must fail (`launch` records an issue), not turn into skipped tests.

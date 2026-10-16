@@ -13,7 +13,7 @@ private nonisolated func isAccessibilityEnabled() -> Bool {
     return AXIsProcessTrusted()
 }
 
-@Suite("hs.ax tests", .testApp)
+@Suite("hs.ax tests")
 struct HSAXTests {
 
     // MARK: - Suite 1: Module structure (no accessibility permissions required)
@@ -27,8 +27,6 @@ struct HSAXTests {
             let harness = JSTestHarness()
             harness.loadModule(HSAXModule.self, as: "ax")
             harness.loadModule(HSApplicationModule.self, as: "application")
-            harness.eval("var testAppPID = \(TestAppControl.pid ?? -1);")
-            TestAppControl.showCurrentTest()
             return harness
         }
 
@@ -270,7 +268,7 @@ struct HSAXTests {
     /// as the target application: one copy runs for the whole suite.
     @Suite("hs.ax element inspection tests", .serialized,
            .disabled(if: !isAccessibilityEnabled(), "Accessibility permissions not available"),
-           .enabled(if: TestAppControl.isAvailable, "The test app could not be built"))
+           .testApp)
     struct HSAXElementInspectionTests {
 
         private func makeHarness() -> JSTestHarness {
@@ -842,7 +840,7 @@ struct HSAXTests {
     /// item titled "New Window". Searching Finder's whole tree took over a minute per test.
     @Suite("hs.ax convenience function tests", .serialized,
            .disabled(if: !isAccessibilityEnabled(), "Accessibility permissions not available"),
-           .enabled(if: TestAppControl.isAvailable, "The test app could not be built"))
+           .testApp)
     struct HSAXJSHelperTests {
 
         private func makeHarness() -> JSTestHarness {
@@ -1188,7 +1186,7 @@ struct HSAXTests {
     /// requiring actual AX notifications to fire.
     @Suite("hs.ax watcher lifecycle tests", .serialized,
            .disabled(if: !isAccessibilityEnabled(), "Accessibility permissions not available"),
-           .enabled(if: TestAppControl.isAvailable, "The test app could not be built"))
+           .testApp)
     struct HSAXWatcherLifecycleTests {
 
         private func makeHarness() -> JSTestHarness {
@@ -1454,7 +1452,7 @@ struct HSAXTests {
     /// application-scoped notifications, without depending on OS notification delivery.
     @Suite("hs.ax watcher routing tests", .serialized,
            .disabled(if: !isAccessibilityEnabled(), "Accessibility permissions not available"),
-           .enabled(if: TestAppControl.isAvailable, "The test app could not be built"))
+           .testApp)
     struct HSAXWatcherRoutingTests {
 
         private func makeHarness() -> JSTestHarness {
@@ -1737,7 +1735,7 @@ struct HSAXTests {
     /// trigger AXWindowCreated.
     @Suite("hs.ax watcher event delivery tests", .serialized,
            .disabled(if: !isAccessibilityEnabled(), "Accessibility permissions not available"),
-           .enabled(if: TestAppControl.isAvailable, "The test app could not be built"))
+           .testApp)
     struct HSAXWatcherEventTests {
 
         private func makeHarness() -> JSTestHarness {
