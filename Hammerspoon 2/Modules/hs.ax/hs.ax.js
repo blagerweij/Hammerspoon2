@@ -93,6 +93,17 @@ class AXModuleWatcherEmitter {
         }
     }
 
+    // Called by Swift when it has dropped a native watcher on its own, because the element was
+    // destroyed or its application quit (issue #299). Drops the matching bucket without calling
+    // back into _removeWatcher(), so a later on() for an equal element registers afresh rather
+    // than finding a stale bucket whose native watcher no longer exists.
+    _forget(element, notification) {
+        const bucket = this.#findBucket(element, notification);
+        if (bucket) {
+            this.#buckets.splice(this.#buckets.indexOf(bucket), 1);
+        }
+    }
+
     // Returns the wrapper function actually registered, so onceEach() can roll it back.
     once(element, notification, listener) {
         if (typeof listener !== 'function') {

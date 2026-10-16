@@ -106,6 +106,7 @@ import AXSwift
     ///   - listener: {(notification: string, element: HSAXElement) => void} A function called with the notification name and the accessibility element it applies to
     /// - Throws: true
     /// - Note: When `notification` is an array, registration is all-or-nothing: if any one of them fails, none are left registered.
+    /// - Note: Listeners are removed automatically when the watched element is destroyed, or when its application quits, so there is no need to call `off` in either case (doing so is harmless). A listener registered for `uIElementDestroyed` is still called for the element's destruction before it is removed.
     /// - Example:
     /// ```js
     /// const app = hs.application.frontmost()
@@ -125,6 +126,8 @@ import AXSwift
     @objc func on(_ element: HSAXElement, _ notification: JSValue, _ listener: JSFunction)
 
     /// Remove a previously registered listener for AX events on a specific element
+    ///
+    /// Listeners for an element that has been destroyed, or whose application has quit, are removed automatically, so this is only needed to stop watching an element that still exists.
     /// - Parameters:
     ///   - element: The HSAXElement that was passed to `on`
     ///   - notification: {string | string[]} The event name, or array of event names, to stop watching
@@ -231,6 +234,8 @@ import AXSwift
     // text fields) can each have their own watcher for the same notification type
     private var watchers: [WatcherKey: HSAXWatcherObject] = [:]
 
+    private static let destroyedNotification = UIElement.AXNotification(rawValue: kAXUIElementDestroyedNotification as String)
+
     // Notification types exposed to JavaScript
     @objc var _notificationTypes: [String: String] = [:]
 
@@ -319,6 +324,11 @@ import AXSwift
         }
 
         super.init()
+
+        // Drop the watchers of an application that quits (issue #299). Selector-based rather
+        // than block-based, so the notification's userInfo needn't cross a @Sendable closure.
+        NSWorkspace.shared.notificationCenter.addObserver(self, selector: #selector(applicationDidTerminate(_:)), name: NSWorkspace.didTerminateApplicationNotification, object: nil)
+
         AKGarbage("Init of \(self.moduleName)")
     }
 
@@ -336,22 +346,16 @@ import AXSwift
     }
 
     func shutdown() {
+        NSWorkspace.shared.notificationCenter.removeObserver(self, name: NSWorkspace.didTerminateApplicationNotification, object: nil)
+
         // Clean up all watchers
-        for key in Array(watchers.keys) {
-            if let watcherObject = watchers[key] {
-                do {
-                    let pid = try watcherObject.element.pid()
-                    if let observer = observers[pid] {
-                        do {
-                            try observer.removeNotification(watcherObject.notification, forElement: watcherObject.element)
-                            AKDebug("hs.ax: Removed watcher for \(watcherObject.notification.rawValue)")
-                        } catch {
-                            AKError("hs.ax: Error removing watcher: \(error)")
-                        }
-                    }
-                } catch {
-                    AKError("hs.ax: Error getting PID during shutdown: \(error)")
-                }
+        for watcherObject in watchers.values {
+            guard let observer = observers[watcherObject.pid] else { continue }
+            do {
+                try observer.removeNotification(watcherObject.notification, forElement: watcherObject.element)
+                AKDebug("hs.ax: Removed watcher for \(watcherObject.notification.rawValue)")
+            } catch {
+                AKError("hs.ax: Error removing watcher: \(error)")
             }
         }
         watchers.removeAll()
@@ -527,29 +531,47 @@ import AXSwift
         }
 
         // Create the watcher object
-        let watcherObject = HSAXWatcherObject(element: element.element, notification: notifType, callback: listener, owner: self, isApplicationElement: element.role == "AXApplication")
+        let isApplicationElement = element.role == "AXApplication"
+        let watcherObject = HSAXWatcherObject(element: element.element, notification: notifType, callback: listener, owner: self, isApplicationElement: isApplicationElement, pid: pid)
         watchers[key] = watcherObject
 
         // Add the notification to the observer
         do {
             try observer.addNotification(notifType, forElement: element.element)
             AKDebug("hs.ax.on(): Added watcher for \(notification) on PID \(pid)")
-            return true
         } catch {
             AKError("hs.ax.on(): Failed to add notification: \(error)")
             watchers.removeValue(forKey: key)
+            removeObserverIfUnused(pid: pid)
             return false
         }
+
+        // Also watch for the element's destruction, whether or not the caller asked to, so its
+        // watchers can be dropped when it goes away (issue #299). Re-adding an already
+        // registered notification is not an error. Application elements are skipped: there,
+        // AXUIElementDestroyed bubbles up from every descendant, and app termination is caught
+        // via NSWorkspace instead.
+        if !isApplicationElement {
+            do {
+                try observer.addNotification(Self.destroyedNotification, forElement: element.element)
+            } catch {
+                // Not fatal: the watcher works, it just can't be cleaned up automatically
+                AKDebug("hs.ax.on(): Element does not support \(Self.destroyedNotification.rawValue), so its watchers won't be removed automatically: \(error)")
+            }
+        }
+        return true
     }
 
     @objc(_removeWatcher::) func _removeWatcher(_ element: HSAXElement, notification: String) {
-        let pid = pid_t(element.pid)
         let key = WatcherKey(element: element.element, notification: notification)
 
         guard let watcherObject = watchers[key] else {
             AKDebug("hs.ax.off(): No watcher found for \(notification) on this element")
             return
         }
+
+        // The stored PID, not element.pid: the element's own may no longer be readable
+        let pid = watcherObject.pid
 
         guard let observer = observers[pid] else {
             AKDebug("hs.ax.off(): No observer found for PID \(pid)")
@@ -564,12 +586,7 @@ import AXSwift
             watchers.removeValue(forKey: key)
 
             // If there are no more watchers for this PID, clean up the observer
-            let remainingWatchers = watchers.keys.filter { (try? $0.element.pid()) == pid }
-            if remainingWatchers.isEmpty {
-                observer.stop()
-                observers.removeValue(forKey: pid)
-                AKDebug("hs.ax.off(): Removed observer for PID \(pid) (no more watchers)")
-            }
+            removeObserverIfUnused(pid: pid)
         }
 
         // Check the AXUIElement is still valid
@@ -580,14 +597,68 @@ import AXSwift
             return
         }
 
-        // Remove the notification from the observer
+        // Remove the notification from the observer. The element's AXUIElementDestroyed
+        // registration is shared with the internal destruction watch made by _addWatcher, so it
+        // stays until the element's last watcher goes (or, for an application element, which has
+        // no internal watch, until the caller's own watcher for it goes).
+        let elementHasOtherWatchers = watchers.keys.contains { $0 != key && $0.element == watcherObject.element }
+        let isDestroyedWatcher = watcherObject.notification == Self.destroyedNotification
         do {
-            try observer.removeNotification(watcherObject.notification, forElement: watcherObject.element)
+            if !isDestroyedWatcher || watcherObject.isApplicationElement || !elementHasOtherWatchers {
+                try observer.removeNotification(watcherObject.notification, forElement: watcherObject.element)
+            }
+            if !isDestroyedWatcher && !watcherObject.isApplicationElement && !elementHasOtherWatchers {
+                try observer.removeNotification(Self.destroyedNotification, forElement: watcherObject.element)
+            }
             AKDebug("hs.ax.off(): Removed watcher for \(notification) on PID \(pid)")
         } catch {
             AKError("hs.ax.off(): Failed to remove notification: \(error)")
         }
     }
+
+    /// Stops and discards the observer for `pid` if no watchers for that process remain
+    private func removeObserverIfUnused(pid: pid_t) {
+        guard !watchers.values.contains(where: { $0.pid == pid }),
+              let observer = observers.removeValue(forKey: pid) else { return }
+        observer.stop()
+        AKDebug("hs.ax: Removed observer for PID \(pid) (no more watchers)")
+    }
+
+    /// Drops every watcher matching `predicate` without touching the AX registrations, which
+    /// died with the element or process. Used when an element is destroyed or its app quits,
+    /// so no JS listener ever has to call off() for something that no longer exists (#299).
+    private func dropWatchers(where predicate: (WatcherKey, HSAXWatcherObject) -> Bool) {
+        let dropped = watchers.filter { predicate($0.key, $0.value) }
+        guard !dropped.isEmpty else { return }
+
+        for key in dropped.keys {
+            watchers.removeValue(forKey: key)
+        }
+        for pid in Set(dropped.values.map(\.pid)) {
+            removeObserverIfUnused(pid: pid)
+        }
+
+        // Tell the JS emitter, so it drops its matching buckets too
+        for key in dropped.keys {
+            _ = _watcherEmitter?.invokeMethod("_forget", withArguments: [HSAXElement(element: key.element), key.notification])
+        }
+        AKDebug("hs.ax: Automatically removed \(dropped.count) watcher\(dropped.count == 1 ? "" : "s") for a destroyed element or terminated application")
+    }
+
+    @objc private func applicationDidTerminate(_ notification: Notification) {
+        guard let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication else { return }
+        handleApplicationTerminated(pid: app.processIdentifier)
+    }
+
+    /// Drops every watcher, and the observer, for a process that has quit.
+    /// Internal rather than private so tests can simulate termination without quitting an app.
+    func handleApplicationTerminated(pid: pid_t) {
+        dropWatchers { _, watcherObject in watcherObject.pid == pid }
+        observers.removeValue(forKey: pid)?.stop()
+    }
+
+    /// The number of registered element+notification watchers, for tests
+    var watcherCount: Int { watchers.count }
 
     /// Handle a notification from the observer
     /// Internal rather than private so tests can simulate AX notification delivery directly,
@@ -612,17 +683,23 @@ import AXSwift
             return nil
         }
 
-        guard !matchedWatchers.isEmpty else {
-            // This can happen if we're watching multiple notifications on an element
-            // and we only have watchers for some of them
-            return
+        if !matchedWatchers.isEmpty {
+            // matchedWatchers can be empty if we're watching multiple notifications on an
+            // element and only have watchers for some of them, or if this is the internal
+            // destruction watch made by _addWatcher
+            let wrappedElement = HSAXElement(element: element)
+            let notificationName = _notificationTypes.firstKey(forValue: notificationValue) ?? notificationValue
+
+            for watcherObject in matchedWatchers {
+                watcherObject.handleEvent(element: wrappedElement, notification: notificationName)
+            }
         }
 
-        let wrappedElement = HSAXElement(element: element)
-        let notificationName = _notificationTypes.firstKey(forValue: notificationValue) ?? notificationValue
-
-        for watcherObject in matchedWatchers {
-            watcherObject.handleEvent(element: wrappedElement, notification: notificationName)
+        // Once the element is gone, none of its watchers can fire again. This runs after the
+        // listeners above, so a uIElementDestroyed listener still hears about it, and it copes
+        // with those listeners having already called off() themselves.
+        if notification == Self.destroyedNotification {
+            dropWatchers { key, _ in key.element == element }
         }
     }
 

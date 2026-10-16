@@ -1567,6 +1567,147 @@ struct HSAXTests {
             #expect(harness.eval("_rtAppEvents2.length") as? Int == 2)
             #expect(harness.eval("_rtItemAEvents2.length") as? Int == 1)
         }
+
+        @Test("a destroyed element's watchers are all removed automatically, after its destroyed listener fires")
+        @MainActor
+        func testDestroyedElementWatchersAreRemoved() {
+            let harness = makeHarness()
+            guard let fixture = makeFixture(harness) else {
+                Issue.record("Could not set up Finder AX fixture")
+                return
+            }
+
+            harness.eval("""
+            globalThis._rtDestroyEvents = [];
+            var _rtDestroyFn = function(n, e) { _rtDestroyEvents.push(n); };
+            var _rtSiblingFn = function(n, e) {};
+            globalThis._rtDestroyFn = _rtDestroyFn;
+            globalThis._rtSiblingFn = _rtSiblingFn;
+            hs.ax.on(_rtItemA, ['AXValueChanged', 'AXUIElementDestroyed'], _rtDestroyFn);
+            hs.ax.on(_rtItemB, 'AXValueChanged', _rtSiblingFn);
+        """)
+            defer {
+                harness.eval("""
+                hs.ax.off(_rtItemA, ['AXValueChanged', 'AXUIElementDestroyed'], _rtDestroyFn);
+                hs.ax.off(_rtItemB, 'AXValueChanged', _rtSiblingFn);
+            """)
+            }
+            #expect(!harness.hasException)
+            #expect(fixture.module.watcherCount == 3)
+
+            fixture.module.handleNotification(element: fixture.itemA, notification: UIElement.AXNotification(rawValue: "AXUIElementDestroyed"))
+
+            // The destroyed listener still hears about the destruction...
+            #expect(harness.eval("_rtDestroyEvents.length") as? Int == 1)
+            // ...then both of itemA's watchers are gone, while its sibling's is untouched
+            #expect(fixture.module.watcherCount == 1)
+
+            // Nothing is left to fire for itemA
+            fixture.module.handleNotification(element: fixture.itemA, notification: UIElement.AXNotification(rawValue: "AXValueChanged"))
+            #expect(harness.eval("_rtDestroyEvents.length") as? Int == 1)
+        }
+
+        @Test("watching an element again after its watchers were removed on destruction registers it afresh")
+        @MainActor
+        func testReWatchingAfterAutomaticRemovalRegistersNatively() {
+            let harness = makeHarness()
+            guard let fixture = makeFixture(harness) else {
+                Issue.record("Could not set up Finder AX fixture")
+                return
+            }
+
+            harness.eval("""
+            globalThis._rtRewatchEvents = [];
+            var _rtRewatchFn = function(n, e) { _rtRewatchEvents.push(n); };
+            globalThis._rtRewatchFn = _rtRewatchFn;
+            hs.ax.on(_rtItemA, 'AXValueChanged', _rtRewatchFn);
+        """)
+            defer { harness.eval("hs.ax.off(_rtItemA, 'AXValueChanged', _rtRewatchFn);") }
+            #expect(!harness.hasException)
+
+            // itemA isn't really destroyed, so it can be watched again afterwards. The JS
+            // emitter must have dropped its bucket too, or this on() would skip the native
+            // registration and the listener would never fire.
+            fixture.module.handleNotification(element: fixture.itemA, notification: UIElement.AXNotification(rawValue: "AXUIElementDestroyed"))
+            #expect(fixture.module.watcherCount == 0)
+
+            harness.eval("hs.ax.on(_rtItemA, 'AXValueChanged', _rtRewatchFn);")
+            #expect(!harness.hasException)
+            #expect(fixture.module.watcherCount == 1)
+
+            fixture.module.handleNotification(element: fixture.itemA, notification: UIElement.AXNotification(rawValue: "AXValueChanged"))
+            #expect(harness.eval("_rtRewatchEvents.length") as? Int == 1)
+        }
+
+        @Test("a destroyed listener that calls off() itself is still handled cleanly")
+        @MainActor
+        func testDestroyedListenerCallingOffItself() {
+            let harness = makeHarness()
+            guard let fixture = makeFixture(harness) else {
+                Issue.record("Could not set up Finder AX fixture")
+                return
+            }
+
+            harness.eval("""
+            globalThis._rtSelfOffEvents = [];
+            var _rtSelfOffFn = function(n, e) {
+                _rtSelfOffEvents.push(n);
+                hs.ax.off(_rtItemA, ['AXValueChanged', 'AXUIElementDestroyed'], _rtSelfOffFn);
+            };
+            hs.ax.on(_rtItemA, ['AXValueChanged', 'AXUIElementDestroyed'], _rtSelfOffFn);
+        """)
+            #expect(!harness.hasException)
+            #expect(fixture.module.watcherCount == 2)
+
+            fixture.module.handleNotification(element: fixture.itemA, notification: UIElement.AXNotification(rawValue: "AXUIElementDestroyed"))
+
+            #expect(!harness.hasException)
+            #expect(harness.eval("_rtSelfOffEvents.length") as? Int == 1)
+            #expect(fixture.module.watcherCount == 0)
+        }
+
+        @Test("an application's watchers are all removed automatically when it terminates")
+        @MainActor
+        func testTerminatedApplicationWatchersAreRemoved() {
+            let harness = makeHarness()
+            guard let fixture = makeFixture(harness),
+                  let pid = harness.eval("_rtAppElem.pid") as? Int else {
+                Issue.record("Could not set up Finder AX fixture")
+                return
+            }
+
+            harness.eval("""
+            globalThis._rtTermEvents = [];
+            var _rtTermFn = function(n, e) { _rtTermEvents.push(n); };
+            globalThis._rtTermFn = _rtTermFn;
+            hs.ax.on(_rtAppElem, 'AXValueChanged', _rtTermFn);
+            hs.ax.on(_rtItemA, 'AXValueChanged', _rtTermFn);
+        """)
+            defer {
+                harness.eval("""
+                hs.ax.off(_rtAppElem, 'AXValueChanged', _rtTermFn);
+                hs.ax.off(_rtItemA, 'AXValueChanged', _rtTermFn);
+            """)
+            }
+            #expect(!harness.hasException)
+            #expect(fixture.module.watcherCount == 2)
+
+            // A different PID's termination leaves them alone
+            fixture.module.handleApplicationTerminated(pid: pid_t(pid) + 100_000)
+            #expect(fixture.module.watcherCount == 2)
+
+            // Simulated, so Finder needn't actually quit
+            fixture.module.handleApplicationTerminated(pid: pid_t(pid))
+            #expect(fixture.module.watcherCount == 0)
+
+            fixture.module.handleNotification(element: fixture.itemA, notification: UIElement.AXNotification(rawValue: "AXValueChanged"))
+            #expect(harness.eval("_rtTermEvents.length") as? Int == 0)
+
+            // And the emitter has forgotten them, so they can be watched again
+            harness.eval("hs.ax.on(_rtItemA, 'AXValueChanged', _rtTermFn);")
+            #expect(!harness.hasException)
+            #expect(fixture.module.watcherCount == 1)
+        }
     }
 
     // MARK: - Suite 5: Watcher event delivery (requires accessibility permissions)

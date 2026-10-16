@@ -24,9 +24,14 @@ class HSAXWatcherObject {
     /// those notifications by PID rather than requiring an exact element match.
     let isApplicationElement: Bool
 
-    init(element: UIElement, notification: UIElement.AXNotification, callback: JSFunction, owner: AnyObject, isApplicationElement: Bool) {
+    /// The PID of the process `element` belongs to, captured at registration so the watcher
+    /// can still be matched to its process after the element (or the whole app) is gone
+    let pid: pid_t
+
+    init(element: UIElement, notification: UIElement.AXNotification, callback: JSFunction, owner: AnyObject, isApplicationElement: Bool, pid: pid_t) {
         self.element = element
         self.notification = notification
+        self.pid = pid
         self.callback = JSCallback(value: callback, owner: owner)
         self.owner = owner
         self.isApplicationElement = isApplicationElement
