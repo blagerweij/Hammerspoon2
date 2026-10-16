@@ -53,6 +53,29 @@ struct HSShortcutsIntegrationTests {
             return harness
         }
 
+        /// The shortcuts the `shortcuts` command-line tool lists, as "name (id)" lines: what
+        /// `list()` should return, read without Apple Events.
+        private static func shortcutsFromCLI() throws -> [String] {
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/shortcuts")
+            process.arguments = ["list", "--show-identifiers"]
+            let pipe = Pipe()
+            process.standardOutput = pipe
+            try process.run()
+            let output = pipe.fileHandleForReading.readDataToEndOfFile()
+            process.waitUntilExit()
+            return String(decoding: output, as: UTF8.self).split(separator: "\n").map(String.init)
+        }
+
+        /// Puts `list()`'s result in the JS variable `shortcuts`. Fails when it threw or is empty:
+        /// the entry checks are vacuous for an empty array, so they'd pass whatever `list()` did.
+        private func listShortcuts(into harness: JSTestHarness) throws {
+            harness.eval("var shortcuts = hs.shortcuts.list()")
+            try #require(!harness.hasException, "list() threw: \(harness.exceptionMessage ?? "")")
+            let count = harness.evalValue("shortcuts.length")?.toInt32() ?? 0
+            try #require(count > 0, "No shortcuts to check list()'s entries against; create one in the Shortcuts app (the VM's provisioning creates one)")
+        }
+
         @Test("list() returns an array")
         func testListReturnsArray() {
             let harness = makeHarness()
@@ -60,44 +83,53 @@ struct HSShortcutsIntegrationTests {
             #expect(!harness.hasException)
         }
 
-        @Test("list() entries each have a name string")
-        func testListEntriesHaveName() {
+        @Test("list() returns the shortcuts the shortcuts command-line tool lists")
+        func testListMatchesCLI() throws {
+            let expected = try Self.shortcutsFromCLI()
+            try #require(!expected.isEmpty, "No shortcuts to compare list() with; create one in the Shortcuts app (the VM's provisioning creates one)")
             let harness = makeHarness()
-            harness.eval("var shortcuts = hs.shortcuts.list()")
-            harness.expectTrue("""
-                shortcuts.every(s => typeof s.name === 'string')
-            """)
-            #expect(!harness.hasException)
+            let listed = harness.evalValue("hs.shortcuts.list().map(s => s.name + ' (' + s.id + ')')")?.toArray() as? [String]
+            #expect(!harness.hasException, "list() threw: \(harness.exceptionMessage ?? "")")
+            #expect(listed?.sorted() == expected.sorted())
+        }
+
+        @Test("list() entries each have a name string")
+        func testListEntriesHaveName() throws {
+            let harness = makeHarness()
+            try listShortcuts(into: harness)
+            harness.expectTrue("shortcuts.every(s => typeof s.name === 'string')")
         }
 
         @Test("list() entries each have an id string")
-        func testListEntriesHaveId() {
+        func testListEntriesHaveId() throws {
             let harness = makeHarness()
-            harness.eval("var shortcuts = hs.shortcuts.list()")
-            harness.expectTrue("""
-                shortcuts.every(s => typeof s.id === 'string')
-            """)
-            #expect(!harness.hasException)
+            try listShortcuts(into: harness)
+            harness.expectTrue("shortcuts.every(s => typeof s.id === 'string')")
         }
 
         @Test("list() entries each have an acceptsInput boolean")
-        func testListEntriesHaveAcceptsInput() {
+        func testListEntriesHaveAcceptsInput() throws {
             let harness = makeHarness()
-            harness.eval("var shortcuts = hs.shortcuts.list()")
-            harness.expectTrue("""
-                shortcuts.every(s => typeof s.acceptsInput === 'boolean')
-            """)
-            #expect(!harness.hasException)
+            try listShortcuts(into: harness)
+            harness.expectTrue("shortcuts.every(s => typeof s.acceptsInput === 'boolean')")
         }
 
         @Test("list() entries each have an actionCount number")
-        func testListEntriesHaveActionCount() {
+        func testListEntriesHaveActionCount() throws {
             let harness = makeHarness()
-            harness.eval("var shortcuts = hs.shortcuts.list()")
-            harness.expectTrue("""
-                shortcuts.every(s => typeof s.actionCount === 'number')
-            """)
-            #expect(!harness.hasException)
+            try listShortcuts(into: harness)
+            harness.expectTrue("shortcuts.every(s => typeof s.actionCount === 'number')")
+        }
+
+        @Test("list() throws when Shortcuts Events can't be asked")
+        func testListThrowsOnFailure() throws {
+            let harness = makeHarness()
+            let module = try #require(harness.evalValue("hs.shortcuts")?.toObjectOf(HSShortcutsModule.self) as? HSShortcutsModule)
+            module.shortcutsEventsBundleID = "net.tenshu.Hammerspoon-2.NoSuchApp"
+
+            harness.eval("hs.shortcuts.list()")
+
+            #expect(harness.exceptionMessage?.contains("hs.shortcuts.list():") == true, "got: \(harness.exceptionMessage ?? "no exception")")
         }
 
         @Test("run() returns a Promise")

@@ -53,11 +53,20 @@ extension SBApplication: ShortcutsBridgeApp {}
     /// | `acceptsInput` | `boolean` | Whether the shortcut expects input when run |
     /// | `actionCount` | `number` | How many actions the shortcut contains |
     ///
+    /// The shortcuts are read from Shortcuts Events, so Hammerspoon needs the Automation
+    /// permission for it; macOS asks the first time. An empty array means there are no
+    /// shortcuts: when they can't be read (the permission is denied, or nobody answers its
+    /// prompt within 2 minutes), `list()` throws instead.
+    ///
     /// - Returns: An array of shortcut descriptor objects.
+    /// - Throws: true
     /// - Example:
     /// ```js
-    /// const shortcuts = hs.shortcuts.list()
-    /// shortcuts.forEach(s => console.log(s.name))
+    /// try {
+    ///     hs.shortcuts.list().forEach(s => console.log(s.name))
+    /// } catch (err) {
+    ///     console.error(err.message)
+    /// }
     /// ```
     @objc func list() -> [[String: Any]]
 
@@ -106,6 +115,10 @@ extension SBApplication: ShortcutsBridgeApp {}
     /// Shortcuts app coming up.
     var urlOpener: (URL) -> Void = { NSWorkspace.shared.open($0) }
 
+    /// The app `list()` asks for the shortcuts. Tests point it at an app that isn't there to
+    /// check that a failure throws.
+    var shortcutsEventsBundleID = "com.apple.shortcuts.events"
+
     required init(engineID: UUID) {
         self.engineID = engineID
         super.init()
@@ -134,14 +147,12 @@ extension SBApplication: ShortcutsBridgeApp {}
     // MARK: - Public API
 
     @objc func list() -> [[String: Any]] {
-        guard let app = SBApplication(bundleIdentifier: "com.apple.shortcuts.events") else {
-            AKError("hs.shortcuts.list(): Failed to connect to Shortcuts Events")
-            return []
+        guard let app = SBApplication(bundleIdentifier: shortcutsEventsBundleID) else {
+            return listFailed("Failed to connect to Shortcuts Events")
         }
 
         guard let shortcuts = (app as ShortcutsBridgeApp).shortcuts else {
-            AKWarning("hs.shortcuts.list(): No shortcuts property returned by Shortcuts Events")
-            return []
+            return listFailed("No shortcuts property returned by Shortcuts Events")
         }
 
         var result: [[String: Any]] = []
@@ -157,6 +168,11 @@ extension SBApplication: ShortcutsBridgeApp {}
                 "acceptsInput": acceptsInput,
                 "actionCount": actionCount
             ])
+        }
+        // A failed Apple Event leaves the element array empty, which would look like a library
+        // with no shortcuts; only the app knows about the error.
+        if let error = app.lastError() {
+            return listFailed(Self.describeAppleEventError(error))
         }
         AKDebug("hs.shortcuts.list(): Returned \(result.count) shortcuts")
         return result
@@ -205,6 +221,27 @@ extension SBApplication: ShortcutsBridgeApp {}
     }
 
     // MARK: - Private Helpers
+
+    /// Logs why `list()` failed and throws it to the JS caller.
+    private func listFailed(_ reason: String) -> [[String: Any]] {
+        let message = "hs.shortcuts.list(): \(reason)"
+        AKError(message)
+        if let context = JSContext.current() {
+            context.exception = JSValue(newErrorFromMessage: message, in: context)
+        }
+        return []
+    }
+
+    private static func describeAppleEventError(_ error: Error) -> String {
+        switch (error as NSError).code {
+        case -1743: // errAEEventNotPermitted
+            return "Not allowed to control Shortcuts Events; allow it in System Settings > Privacy & Security > Automation"
+        case -1712: // errAETimeout
+            return "Shortcuts Events did not answer in time (is an Automation permission prompt waiting?)"
+        default:
+            return "Shortcuts Events returned an error: \(error.localizedDescription) (\((error as NSError).code))"
+        }
+    }
 
     private func runCLI(shortcutName: String) async throws -> (String?, Int32) {
         let process = Process()
