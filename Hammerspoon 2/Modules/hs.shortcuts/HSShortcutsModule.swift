@@ -102,6 +102,10 @@ extension SBApplication: ShortcutsBridgeApp {}
     private var runningProcesses: [Process] = []
     private var isShutdown = false
 
+    /// Hands `open()`'s URL to the system. Tests replace it to check the URL without the
+    /// Shortcuts app coming up.
+    var urlOpener: (URL) -> Void = { NSWorkspace.shared.open($0) }
+
     required init(engineID: UUID) {
         self.engineID = engineID
         super.init()
@@ -196,7 +200,7 @@ extension SBApplication: ShortcutsBridgeApp {}
             AKError("hs.shortcuts.open(): Failed to construct URL for '\(name)'")
             return
         }
-        NSWorkspace.shared.open(url)
+        urlOpener(url)
         AKDebug("hs.shortcuts.open(): Opened '\(name)'")
     }
 
