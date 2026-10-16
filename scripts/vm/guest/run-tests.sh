@@ -10,6 +10,11 @@ RUN="$HOME/hs2-run"
 xctestrun="$(ls "$RUN"/Products/*.xctestrun 2>/dev/null | head -1)"
 [[ -n "$xctestrun" ]] || { echo "run-tests: no .xctestrun in $RUN/Products" >&2; exit 2; }
 
+# The Test action's -configLocation names the fixture in the host's source tree, which the guest
+# doesn't have; point it at the copy the test bundle carries instead.
+fixture="$RUN/Products/Debug/Hammerspoon 2.app/Contents/PlugIns/Hammerspoon 2Tests.xctest/Contents/Resources/init.js"
+FIXTURE="$fixture" perl -pi -e 's{-configLocation "[^"]*"}{-configLocation "$ENV{FIXTURE}"}g' "$xctestrun"
+
 # Give the desktop a moment to settle after boot (hs2vm start has already closed the boot banner).
 sleep "${HS2VM_SETTLE_SECONDS:-3}"
 
