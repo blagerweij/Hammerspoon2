@@ -2,11 +2,10 @@
 /**
  * Merge one release into the Sparkle appcast.
  *
- * The release script (scripts/release/release.sh) uploads a sparkle.json
- * asset to each GitHub release describing the signed archive and any binary
- * deltas. The appcast workflow feeds that file, plus the rendered release
- * notes, through this script to produce the appcast.xml served from GitHub
- * Pages.
+ * The release script (scripts/release/release.sh) writes a sparkle.json
+ * describing the signed archive and any binary deltas, then feeds it, plus
+ * the rendered release notes, through this script to add the release to the
+ * appcast.xml served from GitHub Pages, which it then signs.
  *
  * Usage:
  *   node scripts/release/update-appcast.js \
@@ -66,6 +65,9 @@ function validateMetadata(metadata) {
     requireString(metadata, 'version', 'metadata');
     requireString(metadata, 'build', 'metadata');
     requireString(metadata, 'minimumSystemVersion', 'metadata');
+    if (metadata.channel !== undefined) {
+        requireString(metadata, 'channel', 'metadata');
+    }
 
     if (metadata.archive === null || typeof metadata.archive !== 'object') {
         throw new Error('metadata: "archive" must be an object');
@@ -105,6 +107,10 @@ function buildItem({ metadata, notesHtml, downloadPrefix, releaseUrl, pubDate })
         `      <sparkle:shortVersionString>${escapeXml(metadata.version)}</sparkle:shortVersionString>`,
         `      <sparkle:minimumSystemVersion>${escapeXml(metadata.minimumSystemVersion)}</sparkle:minimumSystemVersion>`,
     ];
+    if (metadata.channel) {
+        // Only installs that opt in to the channel are offered this item.
+        lines.push(`      <sparkle:channel>${escapeXml(metadata.channel)}</sparkle:channel>`);
+    }
     if (releaseUrl) {
         lines.push(`      <sparkle:fullReleaseNotesLink>${escapeXml(releaseUrl)}</sparkle:fullReleaseNotesLink>`);
     }

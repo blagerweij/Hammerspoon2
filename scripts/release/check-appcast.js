@@ -9,6 +9,9 @@
  *   - an appcast that doesn't contain the release it's attached to
  *   - an appcast built before another release was published, which would drop
  *     that release from the live feed
+ *   - an appcast built before another release's item was updated (say by
+ *     `--update-appcast` after its notes were corrected), which would revert
+ *     that item
  *   - release notes edited on GitHub after the appcast was signed, which would
  *     leave the old notes in Sparkle's update window
  *   - an appcast with no signature at all
@@ -40,6 +43,18 @@ function itemVersions(appcastXml) {
     return versions;
 }
 
+/** Map each item's sparkle:version to the item's XML. */
+function itemsByVersion(appcastXml) {
+    const items = new Map();
+    for (const item of (appcastXml ?? '').match(/<item>[\s\S]*?<\/item>/g) ?? []) {
+        const version = itemVersions(item)[0];
+        if (version !== undefined) {
+            items.set(version, item);
+        }
+    }
+    return items;
+}
+
 function normaliseNotes(text) {
     // GitHub stores notes edited in its web UI with CRLF line endings and may
     // drop the trailing newline, neither of which is a real change.
@@ -54,16 +69,34 @@ function checkAppcast({ candidate, live, build, signedNotes, releaseNotes }) {
         problems.push('appcast.xml is not signed');
     }
 
-    const candidateVersions = new Set(itemVersions(candidate));
-    if (!candidateVersions.has(build)) {
+    const candidateItems = itemsByVersion(candidate);
+    if (!candidateItems.has(build)) {
         problems.push(`appcast.xml has no item for build ${build}`);
     }
 
-    const missing = itemVersions(live).filter((version) => !candidateVersions.has(version));
+    // Every other release must come through exactly as it is live.
+    const missing = [];
+    const changed = [];
+    for (const [version, item] of itemsByVersion(live)) {
+        if (version === build) {
+            continue;
+        }
+        if (!candidateItems.has(version)) {
+            missing.push(version);
+        } else if (candidateItems.get(version).trim() !== item.trim()) {
+            changed.push(version);
+        }
+    }
     if (missing.length > 0) {
         problems.push(
             `appcast.xml would drop build(s) ${missing.join(', ')} from the live feed; ` +
             'it was probably built before another release was published'
+        );
+    }
+    if (changed.length > 0) {
+        problems.push(
+            `appcast.xml would revert build(s) ${changed.join(', ')} to an older version of their items; ` +
+            'it was probably built before they were updated'
         );
     }
 
@@ -119,4 +152,4 @@ if (require.main === module) {
     main();
 }
 
-module.exports = { checkAppcast, itemVersions, normaliseNotes };
+module.exports = { checkAppcast, itemVersions, itemsByVersion, normaliseNotes };

@@ -101,7 +101,9 @@ Options:
                        tools (generate_keys, sign_update, ...) and exit.
   -h, --help           Show this help.
 
-<version> is a tag name like 0.0.15 or 0.1.0-beta.1.
+<version> is a tag name like 0.0.15 or 0.1.0-beta.1. Versions with a suffix
+become GitHub prereleases in Sparkle's "beta" channel, which stable installs
+never see.
 EOF
 }
 
@@ -279,8 +281,21 @@ fi
 
 # Sparkle compares CFBundleVersion, which must only ever increase. The number
 # of commits leading up to the release does that for as long as releases come
-# from one line of history.
+# from one line of history, which these checks make sure of.
+[ "$(git rev-parse --is-shallow-repository)" = "false" ] \
+    || die "this is a shallow clone, so the commit count used as the build number would be too low (run: git fetch --unshallow)"
+for other_tag in $(git tag --points-at HEAD); do
+    [ "$other_tag" = "$VERSION" ] && continue
+    gh release view "$other_tag" >/dev/null 2>&1 \
+        && die "HEAD is already released as $other_tag, and a second release from the same commit would reuse its build number"
+done
 BUILD_NUMBER="$(git rev-list --count HEAD)"
+git fetch --quiet origin gh-pages 2>/dev/null || true
+LIVE_BUILD="$(git show "origin/gh-pages:$APPCAST_NAME" 2>/dev/null \
+    | sed -n 's:.*<sparkle\:version>\([0-9][0-9]*\)</sparkle\:version>.*:\1:p' | sort -n | tail -1)"
+if [ -n "$LIVE_BUILD" ] && [ "$BUILD_NUMBER" -le "$LIVE_BUILD" ]; then
+    die "build $BUILD_NUMBER is not newer than build $LIVE_BUILD in the live appcast, so Sparkle would ignore it"
+fi
 
 xcrun notarytool history --keychain-profile "$NOTARY_PROFILE" >/dev/null 2>&1 \
     || die "notarytool profile '$NOTARY_PROFILE' is missing or invalid (see the setup notes at the top of $0)"
@@ -437,9 +452,14 @@ done
 [ "$delta_count" -gt 0 ] || echo "  no earlier releases with $METADATA_NAME, so no deltas this time"
 
 METADATA="$ASSETS/$METADATA_NAME"
+# Prereleases go in Sparkle's beta channel, which only installs that opt in to
+# it are offered.
+CHANNEL_JSON=""
+[ "$PRERELEASE" = 0 ] || CHANNEL_JSON='
+  "channel": "beta",'
 cat > "$METADATA" <<EOF
 {
-  "version": "$VERSION",
+  "version": "$VERSION",${CHANNEL_JSON}
   "build": "$BUILD_NUMBER",
   "commit": "$HEAD_SHA",
   "minimumSystemVersion": "$MIN_SYSTEM_VERSION",

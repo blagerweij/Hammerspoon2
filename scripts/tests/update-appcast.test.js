@@ -73,6 +73,14 @@ test('is stable when re-run with identical input', () => {
     assert.equal(update(once), once);
 });
 
+test('puts prereleases in their channel and leaves releases in the default one', () => {
+    assert.match(
+        update('', { metadata: { version: '0.0.16-beta.1', channel: 'beta' } }),
+        /<sparkle:channel>beta<\/sparkle:channel>/
+    );
+    assert.doesNotMatch(update(''), /sparkle:channel/);
+});
+
 test('omits the deltas element when there are none', () => {
     assert.doesNotMatch(update('', { metadata: { deltas: [] } }), /sparkle:deltas/);
 });
