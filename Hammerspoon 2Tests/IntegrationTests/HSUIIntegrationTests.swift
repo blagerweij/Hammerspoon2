@@ -336,6 +336,28 @@ struct HSUITests {
             harness.eval("w.destroy()")
         }
 
+        @Test("show() restores a minimized window")
+        func testShowRestoresMinimizedWindow() async throws {
+            let harness = makeHarness()
+            harness.eval("""
+                var w = hs.ui.window({x: 100, y: 100, w: 200, h: 200})
+                    .text("Test")
+                w.show()
+                void 0
+            """)
+            let win = try #require(harness.evalValue("w")?.toObjectOf(HSUIWindow.self) as? HSUIWindow)
+            let nsWindow = try #require(NSApp.windows.first { ($0.delegate as AnyObject?) === win })
+
+            // Minimizing and restoring animate, so wait for each to finish
+            nsWindow.miniaturize(nil)
+            #expect(await harness.waitForAsync(timeout: 5) { nsWindow.isMiniaturized })
+
+            harness.eval("w.show(); void 0")
+            #expect(await harness.waitForAsync(timeout: 5) { !nsWindow.isMiniaturized && nsWindow.isVisible })
+            #expect(!harness.hasException)
+            harness.eval("w.destroy()")
+        }
+
         @Test("onShow/onHide/onDestroy return the window for chaining")
         func testLifecycleCallbacksReturnWindow() {
             let harness = makeHarness()

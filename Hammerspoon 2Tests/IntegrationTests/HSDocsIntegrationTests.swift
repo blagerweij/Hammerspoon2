@@ -49,6 +49,44 @@ struct HSDocsIntegrationTests {
     }
 
     @Test(
+        "show() with no module keeps the page the user navigated to, and switches between JS and TS docs",
+        .disabled(if: isRunningInCI(), "WebKit CVDisplayLink UAF crash in GitHub's virtualized macOS runner — see QUARANTINED IN CI in HSUIWebViewTests")
+    )
+    func testShowFollowsWhatTheWebViewIsShowing() async throws {
+        let (harness, docs) = try makeHarness()
+        let jsPath = try #require(docs.jsDocsPath())
+        let tsPath = try #require(docs.tsDocsPath())
+
+        harness.eval("hs.docs.show(); void 0")
+        let window = try #require(docs.docsWindow)
+        let webView = try #require(docs.docsWebView)
+        func currentPath() -> String? { webView.url.flatMap { URL(string: $0) }?.path }
+
+        #expect(await harness.waitForAsync(timeout: 5) { currentPath() == "\(jsPath)/index.html" })
+
+        // Switching to TS docs navigates even with no module given
+        harness.eval("hs.docs.show(undefined, true); void 0")
+        #expect(await harness.waitForAsync(timeout: 5) { currentPath() == "\(tsPath)/index.html" })
+
+        // The user navigates back to a JS page; a bare show() must leave it there
+        _ = webView.loadURL("file://\(jsPath)/hs.application.html")
+        #expect(await harness.waitForAsync(timeout: 5) { currentPath() == "\(jsPath)/hs.application.html" })
+        // The page's url briefly reads nil as it settles, so watch it for a while rather than
+        // sampling it once: it must never move to the index page.
+        harness.eval("hs.docs.show(); void 0")
+        var seen: [String?] = []
+        for _ in 0..<20 {
+            seen.append(currentPath())
+            try await Task.sleep(for: .milliseconds(100))
+        }
+        #expect(!seen.contains("\(jsPath)/index.html"))
+        #expect(await harness.waitForAsync(timeout: 5) { currentPath() == "\(jsPath)/hs.application.html" })
+
+        #expect(!harness.hasException)
+        window.destroy()
+    }
+
+    @Test(
         "show() after the docs window was closed opens a new one",
         .disabled(if: isRunningInCI(), "WebKit CVDisplayLink UAF crash in GitHub's virtualized macOS runner — see QUARANTINED IN CI in HSUIWebViewTests")
     )

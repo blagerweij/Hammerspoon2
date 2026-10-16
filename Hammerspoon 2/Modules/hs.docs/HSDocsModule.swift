@@ -19,9 +19,10 @@ import JavaScriptCore
 @objc protocol HSDocsModuleAPI: JSExport {
     /// Open the Hammerspoon 2 API documentation in a window
     ///
-    /// If the documentation window is already open, it is brought to the front instead of opening
-    /// another one. It navigates to the requested page if `moduleName` is given, or if `showTS`
-    /// differs from the docs currently shown; otherwise it stays on whatever page it is showing.
+    /// If the documentation window is already open, it is brought to the front (and restored if
+    /// minimized) instead of opening another one. It navigates to the requested page if
+    /// `moduleName` is given, or if it isn't currently showing the requested docs (JS or TS);
+    /// otherwise it stays on whatever page it is showing.
     ///
     /// - Parameter moduleName?: Optional module to navigate to directly (e.g. `"hs.application"`). Omit to open the index page.
     /// - Parameter showTS?: Pass `true` to show TypeScript docs instead of JS docs
@@ -81,10 +82,9 @@ import JavaScriptCore
 
     // The window opened by show(), so another show() while it's open raises it instead of
     // opening a second one. Weak: a shown window is kept alive by hs.ui, and a closed one is
-    // garbage. showingTS records which docs (JS or TS) it was opened on.
+    // garbage.
     private(set) weak var docsWindow: HSUIWindow?
-    private weak var docsWebView: UIWebView?
-    private var showingTS = false
+    private(set) weak var docsWebView: UIWebView?
 
     required init(engineID: UUID) {
         self.engineID = engineID
@@ -127,9 +127,12 @@ import JavaScriptCore
         let fileURL = "file://\(basePath)/\(encodedFile)"
 
         if let window = docsWindow, window.isShown, let webView = docsWebView {
-            if requestedModule != nil || showTS != showingTS {
+            // Ask the web view what it's showing rather than remembering what we loaded: the
+            // user may have navigated since, with its toolbar or links.
+            let currentPath = webView.url.flatMap { URL(string: $0) }?.path
+            let showingRequestedDocs = currentPath?.hasPrefix(basePath + "/") ?? false
+            if requestedModule != nil || !showingRequestedDocs {
                 _ = webView.loadURL(fileURL)
-                showingTS = showTS
             }
             _ = window.show()
             return
@@ -154,7 +157,6 @@ import JavaScriptCore
         }
         docsWindow = created?.atIndex(0).toObject() as? HSUIWindow
         docsWebView = created?.atIndex(1).toObject() as? UIWebView
-        showingTS = showTS
     }
 
     @objc func get(_ identifier: String) -> String? {
