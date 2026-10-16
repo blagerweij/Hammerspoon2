@@ -47,7 +47,8 @@ nonisolated enum TestAppControl {
     /// Launches a new copy in the background and waits until its window is on screen. Only then
     /// is it ready: `hide()` right after `isFinishedLaunching` does nothing.
     /// - Parameter detail: What the test checks; shown in the app's window below the test's name
-    /// - Returns: The running app, or nil when it couldn't be launched
+    /// - Returns: The running app, or nil when it couldn't be launched or showed no window in
+    ///   time; both are recorded as an issue, so a caller that returns early still fails
     @MainActor
     static func launch(detail: String = "") async -> NSRunningApplication? {
         guard let url else { return nil }
@@ -57,10 +58,21 @@ nonisolated enum TestAppControl {
         configuration.addsToRecentItems = false
         configuration.createsNewApplicationInstance = true
         configuration.arguments = ["-test", currentTestName, "-detail", detail]
-        guard let app = try? await NSWorkspace.shared.openApplication(at: url, configuration: configuration) else { return nil }
+        let app: NSRunningApplication
+        do {
+            app = try await NSWorkspace.shared.openApplication(at: url, configuration: configuration)
+        } catch {
+            Issue.record("The test app could not be launched: \(error.localizedDescription)")
+            return nil
+        }
         let deadline = Date().addingTimeInterval(5)
-        while !(app.isFinishedLaunching && hasWindowOnScreen(app)), Date() < deadline {
+        while !isReady(app), Date() < deadline {
             try? await Task.sleep(for: .milliseconds(20))
+        }
+        guard isReady(app) else {
+            Issue.record("The test app showed no window within 5 s")
+            app.terminate()
+            return nil
         }
         return app
     }
@@ -78,6 +90,10 @@ nonisolated enum TestAppControl {
     }()
 
     private static var currentTestName: String { Test.current?.displayName ?? Test.current?.name ?? "" }
+
+    private static func isReady(_ app: NSRunningApplication) -> Bool {
+        app.isFinishedLaunching && hasWindowOnScreen(app)
+    }
 
     private static func hasWindowOnScreen(_ app: NSRunningApplication) -> Bool {
         let windows = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
@@ -117,11 +133,8 @@ nonisolated enum TestAppControl {
 nonisolated struct TestAppTrait: SuiteTrait, TestScoping {
     @concurrent
     func provideScope(for test: Test, testCase: Test.Case?, performing function: @concurrent @Sendable () async throws -> Void) async throws {
-        let pid = await TestAppControl.launchedPID(detail: "One copy for the whole suite")
-        guard let pid else {
-            Issue.record("The test app could not be launched")
-            return
-        }
+        // launch(detail:) has recorded why when there is no pid
+        guard let pid = await TestAppControl.launchedPID(detail: "One copy for the whole suite") else { return }
         defer { NSRunningApplication(processIdentifier: pid)?.terminate() }
         try await TestAppControl.$pid.withValue(pid) { try await function() }
     }
