@@ -301,7 +301,7 @@ conversions can live in the module file.
 - [ ] Protocol has docstrings with `- Example:` on every member
 - [ ] `super.init()` called at the end of every `init`
 - [ ] `@objc` on every property and method in the protocol
-- [ ] There are no methods with names that start with `new`, `alloc` or `copy`
+- [ ] There are no methods or properties with names that start with `new`, `alloc`, `copy` or `mutableCopy` — JavaScriptCore leaks every object they return (#309); use e.g. `duplicate()` instead
 
 ### Engine types only
 - [ ] No `@_documentation(visibility: private)` on the class (engine types are public)

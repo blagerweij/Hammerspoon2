@@ -50,10 +50,10 @@ import Observation
 /// const size = img.size  // Returns HSSize
 ///
 /// // Resize image (mutates in place)
-/// img.size = HSSize(100, 100)
+/// img.size = new HSSize(100, 100)
 ///
 /// // Crop image
-/// const cropped = img.croppedCopy(HSRect(10, 10, 50, 50))
+/// const cropped = img.croppedCopy(new HSRect(10, 10, 50, 50))
 ///
 /// // Save to file
 /// img.saveToFile("/path/to/output.png")
@@ -129,7 +129,7 @@ import Observation
     /// ```js
     /// const img = HSImage.fromPath("/path/to/image.png")
     /// console.log(img.size)       // HSSize { w: 200, h: 150 }
-    /// img.size = HSSize(100, 75)  // resize in place
+    /// img.size = new HSSize(100, 75)  // resize in place
     /// ```
     @objc var size: HSSize { get set }
 
@@ -156,17 +156,17 @@ import Observation
     /// - Returns: A new HSImage copy
     /// - Example:
     /// ```js
-    /// const copy = img.copyImage()
-    /// copy.size = HSSize(64, 64)
+    /// const copy = img.duplicate()
+    /// copy.size = new HSSize(64, 64)
     /// ```
-    @objc func copyImage() -> HSImage?
+    @objc func duplicate() -> HSImage?
 
     /// Create a cropped copy of the image
     /// - Parameter rect: HSRect defining the crop area (x, y, w, h)
     /// - Returns: A new cropped HSImage, or null if the rect falls outside the image bounds
     /// - Example:
     /// ```js
-    /// const cropped = img.croppedCopy(HSRect(10, 10, 80, 60))
+    /// const cropped = img.croppedCopy(new HSRect(10, 10, 80, 60))
     /// ```
     @objc func croppedCopy(_ rect: HSRect) -> HSImage?
 
@@ -308,7 +308,7 @@ import Observation
 
     // MARK: - Image Manipulation
 
-    @objc func copyImage() -> HSImage? {
+    @objc func duplicate() -> HSImage? {
         guard let copiedImage = image.copy() as? NSImage else { return nil }
         return copiedImage.toBridge()
     }

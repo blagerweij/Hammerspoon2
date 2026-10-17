@@ -53,7 +53,7 @@ For the case of a module that we intend to be accessible in JS as "hs.foo", the 
  * HSFooModule should always have an `isolated deinit` that calls `AKGarbage("Deinit of \(name): \(engineID)")`.
  * If the module allocates/retains any data (e.g. watchers, instance children, etc) then it should store weak references to them and be sure to clean them up in its shutdown() method.
  * Any instance child classes should always have an "isolated deinit" method that uses `AKGarbage()` to announce their deinitialisation.
- * NEVER choose method names that start with "new", "alloc" or "copy" since these can fall foul of ObjC's implicit ARC rules and the objects those methods create will have one un-balanced retains.
+ * NEVER give a JSExport method or property a name that starts with "new", "alloc", "copy" or "mutableCopy" (e.g. `copyImage()`, `newWindow()`). Those selectors are in Objective-C's retained-result method families, so Swift returns the object with an extra retain that the caller is expected to release. JavaScriptCore never releases it, so every object such a method returns to JS leaks (#309). Use another verb, such as `duplicate()` or `makeWindow()`. `JSExportNamingTests` fails on any such method that returns an object.
  * NEVER name a method "delete" since this is a reserved keyword in JavaScript and cannot be called as a method (e.g. `obj.delete()` is a syntax error). Use a descriptive alternative such as `deletePath()`, `destroy()`, or `remove()` instead.
 
 ## Object retention: the two mechanisms
