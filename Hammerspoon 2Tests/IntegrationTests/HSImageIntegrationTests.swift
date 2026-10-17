@@ -39,10 +39,13 @@ struct HSImageIntegrationTests {
                 let copy = harness.evalValue("copies[\(index)]")?.toObject() as? HSImage
                 weakCopies.append(WeakBox(copy))
             }
+        }
+        // Checked while `copies` still holds them, since JSC may collect them as soon as it doesn't
+        #expect(weakCopies.allSatisfy { $0.value != nil }, "Every copy should exist while JS holds it")
+
+        autoreleasepool {
             harness.eval("void (globalThis.copies = null)")
         }
-        #expect(weakCopies.allSatisfy { $0.value != nil }, "Every copy should exist before collection")
-
         harness.collectGarbage()
         let survivors = weakCopies.filter { $0.value != nil }.count
         #expect(survivors == 0, "\(survivors) of \(weakCopies.count) duplicated images were never freed")
