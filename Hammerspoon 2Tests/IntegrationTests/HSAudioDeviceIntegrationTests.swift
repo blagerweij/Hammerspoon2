@@ -6,7 +6,6 @@
 import Testing
 import JavaScriptCore
 import CoreAudio
-import AVFoundation
 @testable import Hammerspoon_2
 
 private nonisolated func hasNoAudioDevices() -> Bool {
@@ -22,6 +21,38 @@ private nonisolated func hasNoAudioDevices() -> Bool {
     }
     let count = Int(size) / MemoryLayout<AudioObjectID>.size
     return count == 0
+}
+
+/// Runs an audio device by attaching a do-nothing IOProc to it, so it reports itself as in use.
+/// Used instead of AVAudioEngine, which creates a private aggregate output device that outlives
+/// the engine and then confuses the default-device tests. The HAL zeroes output buffers before
+/// calling the IOProc, so this plays silence. Callers must stop() it.
+private final class DeviceRunner {
+    private let deviceID: AudioObjectID
+    private var procID: AudioDeviceIOProcID?
+
+    init?(deviceID: AudioObjectID) {
+        self.deviceID = deviceID
+        guard unsafe AudioDeviceCreateIOProcIDWithBlock(&procID, deviceID, nil, Self.makeIOBlock()) == noErr,
+              let procID = unsafe procID else { return nil }
+        guard unsafe AudioDeviceStart(deviceID, procID) == noErr else {
+            unsafe AudioDeviceDestroyIOProcID(deviceID, procID)
+            return nil
+        }
+    }
+
+    // nonisolated: the block runs on CoreAudio's realtime thread, and a closure literal formed in
+    // a MainActor context would trap there on its hidden isolation check
+    private nonisolated static func makeIOBlock() -> AudioDeviceIOBlock {
+        return { _, _, _, _, _ in }
+    }
+
+    func stop() {
+        guard let procID = unsafe procID else { return }
+        unsafe AudioDeviceStop(deviceID, procID)
+        unsafe AudioDeviceDestroyIOProcID(deviceID, procID)
+        unsafe self.procID = nil
+    }
 }
 
 @Suite("hs.audiodevice tests")
@@ -600,11 +631,8 @@ struct HSAudioDeviceTests {
             defer { harness.eval("_inUseDev.off('inUse', _inUseFn);") }
             #expect(!harness.hasException)
 
-            // Runs the default output device, playing silence
-            let engine = AVAudioEngine()
-            engine.attach(AVAudioPlayerNode())
-            _ = engine.mainMixerNode
-            guard (try? engine.start()) != nil else { return }
+            guard let runner = DeviceRunner(deviceID: dev.objectID) else { return }
+            defer { runner.stop() }
 
             let started = await harness.waitForAsync(timeout: 2.0) {
                 harness.evalBool("_inUseStates.indexOf(true) !== -1") == true
@@ -612,7 +640,7 @@ struct HSAudioDeviceTests {
             #expect(started)
             #expect(dev.isInUse)
 
-            engine.stop()
+            runner.stop()
             let stopped = await harness.waitForAsync(timeout: 3.0) {
                 harness.evalBool("_inUseStates[_inUseStates.length - 1] === false") == true
             }
