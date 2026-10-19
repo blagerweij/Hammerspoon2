@@ -1,28 +1,25 @@
 #!/usr/bin/env node
 /**
- * Sanity-check a signed appcast before the appcast workflow publishes it.
+ * Sanity-check a signed appcast before it goes live.
  *
- * scripts/release/release.sh builds and signs appcast.xml locally and attaches
- * it to the GitHub release. CI can't re-sign it, so all it can do is refuse to
- * publish one that's stale. This catches:
+ * scripts/release/release.sh signs appcast.xml when it prepares a release, and
+ * runs this both then and again just before execute pushes the feed to
+ * gh-pages. It catches:
  *
- *   - an appcast that doesn't contain the release it's attached to
+ *   - an appcast that doesn't contain the release it's for
  *   - an appcast built before another release was published, which would drop
  *     that release from the live feed
- *   - an appcast built before another release's item was updated (say by
- *     `--update-appcast` after its notes were corrected), which would revert
- *     that item
- *   - release notes edited on GitHub after the appcast was signed, which would
- *     leave the old notes in Sparkle's update window
+ *   - an appcast built before another release's item was updated (say after
+ *     its notes were corrected), which would revert that item
+ *   - release notes on GitHub that differ from the ones signed into the feed
  *   - an appcast with no signature at all
  *
- * The fix for each is to run `scripts/release/release.sh --update-appcast <tag>`
- * and re-run the workflow.
+ * The fix for each is to run `scripts/release/release.sh appcast <version>`.
  *
  * Usage:
  *   node scripts/release/check-appcast.js \
  *     --candidate appcast.xml \
- *     --live site/appcast.xml \
+ *     --live live-appcast.xml \
  *     --metadata sparkle.json \
  *     --signed-notes release-notes.md \
  *     --release-notes release-body.md
@@ -137,11 +134,10 @@ function main() {
 
     if (problems.length > 0) {
         for (const problem of problems) {
-            console.error(`::error::${problem}`);
+            console.error(`error: ${problem}`);
         }
         console.error(
-            `Run \`scripts/release/release.sh --update-appcast ${metadata.version}\` to rebuild and re-sign it, ` +
-            'then re-run this workflow.'
+            `Run \`scripts/release/release.sh appcast ${metadata.version}\` to rebuild and re-sign it.`
         );
         process.exit(1);
     }
