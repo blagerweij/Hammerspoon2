@@ -351,15 +351,10 @@ struct HSAudioDeviceTests {
             }
         }
 
-        @Test("jackConnected is a boolean, or null if unsupported")
+        @Test("jackConnected is a boolean on every device")
         func testJackConnectedType() {
             let harness = makeHarness()
-            harness.expectTrue("""
-            hs.audiodevice.all().every(function(d) {
-                var j = d.jackConnected;
-                return j === null || typeof j === 'boolean';
-            })
-        """)
+            harness.expectTrue("hs.audiodevice.all().every(function(d) { return typeof d.jackConnected === 'boolean'; })")
         }
 
         // MARK: - Per-device watcher event names

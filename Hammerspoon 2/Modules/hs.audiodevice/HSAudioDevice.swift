@@ -266,7 +266,7 @@ private func caDataSourceName(_ objectID: AudioObjectID,
     /// ```
     @objc var isInUse: Bool { get }
 
-    /// {boolean | null} Whether a jack (e.g. headphones) is connected to this device, or `null` if the device
+    /// Whether a jack (e.g. headphones) is connected to this device. Always `false` if the device
     /// does not support jack sensing. Output jack state is reported for devices with output,
     /// otherwise input jack state. Listen for the `"jack"` event to be told when this changes.
     /// - Example:
@@ -274,7 +274,7 @@ private func caDataSourceName(_ objectID: AudioObjectID,
     /// const dev = hs.audiodevice.defaultOutputDevice()
     /// if (dev.jackConnected) console.log("Headphones are plugged in")
     /// ```
-    @objc var jackConnected: JSValue? { get }
+    @objc var jackConnected: Bool { get }
 
     // MARK: Channels
 
@@ -630,16 +630,8 @@ nonisolated enum HSAudioDevicePropertyEvent: String, HSEventName {
         isOutput ? kAudioDevicePropertyScopeOutput : kAudioDevicePropertyScopeInput
     }
 
-    /// Whether a jack is connected, or nil if the device doesn't support jack sensing.
-    private var jackState: Bool? {
-        caGetUInt32(objectID, kAudioDevicePropertyJackIsConnected, jackScope).map { $0 != 0 }
-    }
-
-    // A JSValue rather than NSNumber?, because a nil return reaches JS as undefined, not null
-    @objc var jackConnected: JSValue? {
-        guard let context = JSContext.current() else { return nil }
-        guard let state = jackState else { return JSValue(nullIn: context) }
-        return JSValue(bool: state, in: context)
+    @objc var jackConnected: Bool {
+        (caGetUInt32(objectID, kAudioDevicePropertyJackIsConnected, jackScope) ?? 0) != 0
     }
 
     // MARK: - Channels
@@ -925,7 +917,7 @@ nonisolated enum HSAudioDevicePropertyEvent: String, HSEventName {
     private func eventArguments(_ event: HSAudioDevicePropertyEvent) -> [Any] {
         switch event {
         case .inUse: return [isInUse]
-        case .jack: return [jackState ?? NSNull()]
+        case .jack: return [jackConnected]
         default: return []
         }
     }
