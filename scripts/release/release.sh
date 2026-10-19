@@ -79,7 +79,6 @@ TEAM_ID="VQCYSNZB89"
 METADATA_NAME="sparkle.json"
 APPCAST_NAME="appcast.xml"
 NOTES_NAME="release-notes.md"
-DOCS_WORKFLOW="publish-docs.yml"
 PAGES_WORKFLOW="pages-deploy.yml"
 
 NOTARY_PROFILE="${NOTARY_PROFILE:-hammerspoon2-notary}"
@@ -261,7 +260,10 @@ build_appcast() {
 
     # Start from the live feed, so every earlier release stays in it.
     fetch_live_appcast "$scratch/live.xml"
-    check_build_is_newest "$build" "$scratch/live.xml"
+    # A release that's already live keeps its place; a new one must be newest.
+    if ! grep -q "<sparkle:version>$build</sparkle:version>" "$scratch/live.xml"; then
+        check_build_is_newest "$build" "$scratch/live.xml"
+    fi
     cp "$scratch/live.xml" "$APPCAST"
 
     node "$REPO_ROOT/scripts/release/update-appcast.js" \
@@ -600,30 +602,6 @@ served_appcast_sha() {
     curl -fsSL -H 'Cache-Control: no-cache' "$FEED_URL?nocache=$(date +%s)" 2>/dev/null | shasum -a 256 | cut -d' ' -f1
 }
 
-# Pushing a tag starts the docs workflow, which takes a copy of gh-pages and
-# later force-pushes it back. Wait for it, and any other docs run, to finish
-# so it can't overwrite the appcast pushed after it.
-wait_for_docs_runs() {
-    local expect_tag_run="$1" deadline id
-    if [ "$expect_tag_run" = 1 ]; then
-        echo "Waiting for the docs workflow to start for tag $VERSION"
-        deadline=$((SECONDS + 120))
-        until [ -n "$(gh run list --workflow "$DOCS_WORKFLOW" --limit 20 --json headBranch,databaseId \
-            --jq ".[] | select(.headBranch == \"$VERSION\") | .databaseId")" ]; do
-            if [ "$SECONDS" -ge "$deadline" ]; then
-                echo "  it hasn't started after two minutes, carrying on"
-                break
-            fi
-            sleep 5
-        done
-    fi
-    for id in $(gh run list --workflow "$DOCS_WORKFLOW" --limit 20 --json databaseId,status \
-        --jq '.[] | select(.status != "completed") | .databaseId'); do
-        echo "Waiting for docs workflow run $id to finish"
-        gh run watch "$id" --interval 10 >/dev/null || true
-    done
-}
-
 step_tag() {
     log "Tagging $COMMIT as $VERSION"
     if ! git rev-parse -q --verify "refs/tags/$VERSION" >/dev/null; then
@@ -713,8 +691,8 @@ step_deploy() {
     gh run watch "$run_id" --exit-status --interval 10 >/dev/null \
         || die "the Pages deploy failed: https://github.com/$GH_REPO/actions/runs/$run_id"
 
-    # A docs run that started from an older copy of gh-pages could have put
-    # the previous appcast back.
+    # publish-docs.yml carries the newest appcast through when it rewrites
+    # gh-pages, but check nothing else replaced it.
     fetch_live_appcast "$WORK/live.xml"
     [ "$(sha256_of "$WORK/live.xml")" = "$APPCAST_SHA" ] \
         || die "gh-pages lost the new appcast while deploying, probably to a docs run"
@@ -835,10 +813,7 @@ cmd_execute() {
     EXECUTING=1
     [ "$tag_state" = "done" ] || step_tag
     [ "$release_state_text" = "done" ] || step_release
-    if [ "$appcast_state" != "done" ]; then
-        wait_for_docs_runs "$([ "$tag_state" = "done" ] && echo 0 || echo 1)"
-        step_appcast
-    fi
+    [ "$appcast_state" = "done" ] || step_appcast
     step_deploy
     EXECUTING=0
 

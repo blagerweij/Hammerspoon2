@@ -120,16 +120,40 @@ jobs:
         run: |
           # Create a single orphan commit on gh-pages containing the complete
           # current site. Force-push keeps the branch lean (no history).
+          #
+          # scripts/release/release.sh pushes a signed appcast.xml to gh-pages
+          # outside this workflow, possibly since the clone above. So take
+          # appcast.xml from gh-pages as it is now, and only replace the
+          # branch if it hasn't moved again since; otherwise go round again.
+          REMOTE="https://x-access-token:${GITHUB_TOKEN}@github.com/${{ github.repository }}.git"
           cd site
           git init
           git checkout --orphan gh-pages
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add -A
-          git commit -m "docs: publish ${{ steps.version.outputs.name }}"
-          git push --force \
-            "https://x-access-token:${GITHUB_TOKEN}@github.com/${{ github.repository }}.git" \
-            gh-pages
+          for attempt in 1 2 3 4 5; do
+            LEASE=""
+            if git ls-remote --exit-code "$REMOTE" refs/heads/gh-pages > /dev/null; then
+              git fetch --quiet --depth 1 "$REMOTE" refs/heads/gh-pages
+              LEASE="$(git rev-parse FETCH_HEAD)"
+              if git cat-file -e FETCH_HEAD:appcast.xml 2> /dev/null; then
+                git show FETCH_HEAD:appcast.xml > appcast.xml
+              fi
+            fi
+            git add -A
+            if git rev-parse --quiet --verify HEAD > /dev/null; then
+              git commit --quiet --amend --no-edit
+            else
+              git commit --quiet -m "docs: publish ${{ steps.version.outputs.name }}"
+            fi
+            if git push --force-with-lease="gh-pages:${LEASE}" "$REMOTE" gh-pages; then
+              exit 0
+            fi
+            echo "gh-pages changed while publishing, retrying (attempt $attempt)"
+            sleep 5
+          done
+          echo "::error::Couldn't update gh-pages: it kept changing"
+          exit 1
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
