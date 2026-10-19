@@ -254,6 +254,28 @@ private func caDataSourceName(_ objectID: AudioObjectID,
     /// ```
     @objc var transportType: String { get }
 
+    // MARK: Activity
+
+    /// Whether any process (not just Hammerspoon) is currently using this device for input
+    /// or output - e.g. a call or dictation app has opened the microphone, or music is playing.
+    /// Listen for the `"inUse"` event to be told when this changes.
+    /// - Example:
+    /// ```js
+    /// const mic = hs.audiodevice.defaultInputDevice()
+    /// if (mic.isInUse) console.log("Something is using the microphone")
+    /// ```
+    @objc var isInUse: Bool { get }
+
+    /// {boolean | null} Whether a jack (e.g. headphones) is connected to this device, or `null` if the device
+    /// does not support jack sensing. Output jack state is reported for devices with output,
+    /// otherwise input jack state. Listen for the `"jack"` event to be told when this changes.
+    /// - Example:
+    /// ```js
+    /// const dev = hs.audiodevice.defaultOutputDevice()
+    /// if (dev.jackConnected) console.log("Headphones are plugged in")
+    /// ```
+    @objc var jackConnected: NSNumber? { get }
+
     // MARK: Channels
 
     /// Number of output channels, or 0 if the device has no output.
@@ -439,16 +461,27 @@ private func caDataSourceName(_ objectID: AudioObjectID,
     /// - `"rate"` — sample rate changed
     /// - `"dsout"` — output data source changed
     /// - `"dsin"` — input data source changed
+    /// - `"balance"` — output stereo balance changed
+    /// - `"inUse"` — the device started or stopped being used by any process. The listener
+    ///   receives the new ``isInUse`` value.
+    /// - `"jack"` — a jack (e.g. headphones) was connected or disconnected. The listener
+    ///   receives the new ``jackConnected`` value.
+    /// - `"config"` — the device's configuration changed (e.g. its streams or channel layout);
+    ///   any properties you have cached for it may be stale
     ///
     /// - Parameters:
-    ///   - event: {"vmout" | "vmin" | "mout" | "min" | "rate" | "dsout" | "dsin"} The event to listen for
-    ///   - listener: {() => void} Called when the event occurs
+    ///   - event: {"vmout" | "vmin" | "mout" | "min" | "rate" | "dsout" | "dsin" | "balance" | "inUse" | "jack" | "config"} The event to listen for
+    ///   - listener: {(state?: boolean) => void} Called when the event occurs. For `"inUse"` and `"jack"` it is passed the device's new state; for all other events it is passed nothing
     /// - Throws: true
     /// - Example:
     /// ```js
     /// const dev = hs.audiodevice.defaultOutputDevice()
     /// try {
     ///     dev.on('vmout', () => console.log("Output volume changed"))
+    ///
+    ///     // Be told whenever any app opens or releases the microphone
+    ///     const mic = hs.audiodevice.defaultInputDevice()
+    ///     mic.on('inUse', (inUse) => console.log("Microphone is " + (inUse ? "in use" : "idle")))
     /// } catch (err) {
     ///     console.error(err.message)
     /// }
@@ -457,7 +490,7 @@ private func caDataSourceName(_ objectID: AudioObjectID,
 
     /// Remove a previously registered per-device event listener.
     /// - Parameters:
-    ///   - event: {"vmout" | "vmin" | "mout" | "min" | "rate" | "dsout" | "dsin"} The event the listener was registered for
+    ///   - event: {"vmout" | "vmin" | "mout" | "min" | "rate" | "dsout" | "dsin" | "balance" | "inUse" | "jack" | "config"} The event the listener was registered for
     ///   - listener: The function originally passed to `on`
     /// - Example:
     /// ```js
@@ -467,8 +500,8 @@ private func caDataSourceName(_ objectID: AudioObjectID,
 
     /// Register a listener that fires at most once for a per-device event.
     /// - Parameters:
-    ///   - event: {"vmout" | "vmin" | "mout" | "min" | "rate" | "dsout" | "dsin"} The event to listen for
-    ///   - listener: {() => void} Called once, then automatically removed
+    ///   - event: {"vmout" | "vmin" | "mout" | "min" | "rate" | "dsout" | "dsin" | "balance" | "inUse" | "jack" | "config"} The event to listen for
+    ///   - listener: {(state?: boolean) => void} Called once, then automatically removed. Passed the new state for `"inUse"` and `"jack"`, as for `on()`
     /// - Throws: true
     /// - Example:
     /// ```js
@@ -506,6 +539,10 @@ nonisolated enum HSAudioDevicePropertyEvent: String, HSEventName {
     case sampleRate = "rate"
     case outputDataSource = "dsout"
     case inputDataSource = "dsin"
+    case balance = "balance"
+    case inUse = "inUse"
+    case jack = "jack"
+    case configuration = "config"
 }
 
 @safe @_documentation(visibility: private)
@@ -580,6 +617,22 @@ nonisolated enum HSAudioDevicePropertyEvent: String, HSEventName {
         case kAudioDeviceTransportTypePCI:          return "pci"
         default:                                    return "unknown"
         }
+    }
+
+    // MARK: - Activity
+
+    @objc var isInUse: Bool {
+        (caGetUInt32(objectID, kAudioDevicePropertyDeviceIsRunningSomewhere) ?? 0) != 0
+    }
+
+    /// The scope jack sensing is reported for: output if the device has any, otherwise input.
+    private var jackScope: AudioObjectPropertyScope {
+        isOutput ? kAudioDevicePropertyScopeOutput : kAudioDevicePropertyScopeInput
+    }
+
+    @objc var jackConnected: NSNumber? {
+        guard let v = caGetUInt32(objectID, kAudioDevicePropertyJackIsConnected, jackScope) else { return nil }
+        return NSNumber(value: v != 0)
     }
 
     // MARK: - Channels
@@ -813,6 +866,10 @@ nonisolated enum HSAudioDevicePropertyEvent: String, HSEventName {
             (kAudioDevicePropertyNominalSampleRate, kAudioObjectPropertyScopeGlobal, .sampleRate),
             (kAudioDevicePropertyDataSource,   kAudioDevicePropertyScopeOutput, .outputDataSource),
             (kAudioDevicePropertyDataSource,   kAudioDevicePropertyScopeInput,  .inputDataSource),
+            (kAudioDevicePropertyStereoPan,    kAudioDevicePropertyScopeOutput, .balance),
+            (kAudioDevicePropertyDeviceIsRunningSomewhere, kAudioObjectPropertyScopeGlobal, .inUse),
+            (kAudioDevicePropertyJackIsConnected, jackScope,                    .jack),
+            (kAudioDevicePropertyDeviceHasChanged, kAudioObjectPropertyScopeGlobal, .configuration),
         ]
 
         for (selector, scope, event) in candidates {
@@ -822,7 +879,8 @@ nonisolated enum HSAudioDevicePropertyEvent: String, HSEventName {
             // Delivered on .main (see AudioObjectAddPropertyListenerBlock below)
             let block: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
                 MainActor.assumeIsolated {
-                    _ = self?.watcherCallback?.call(withArguments: [eventName])
+                    guard let self else { return }
+                    _ = self.watcherCallback?.call(withArguments: [eventName] + self.eventArguments(event))
                 }
             }
             if unsafe AudioObjectAddPropertyListenerBlock(objectID, &a, .main, block) == noErr {
@@ -853,6 +911,16 @@ nonisolated enum HSAudioDevicePropertyEvent: String, HSEventName {
         }
         AKDebug(unsafe "HSAudioDevice id=\(objectID): watcher started (\(deviceRegistrations.count) listeners)")
         return true
+    }
+
+    /// Extra arguments passed to listeners after the event name: the new state, for the events
+    /// that report one. Read when the event is delivered, not when CoreAudio queued it.
+    private func eventArguments(_ event: HSAudioDevicePropertyEvent) -> [Any] {
+        switch event {
+        case .inUse: return [isInUse]
+        case .jack: return [jackConnected ?? NSNull()]
+        default: return []
+        }
     }
 
     @objc(_removeWatcher) func _removeWatcher() {

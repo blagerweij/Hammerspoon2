@@ -73,8 +73,8 @@ hs.audiodevice.once = function(event, listener) {
 /// SKIP_DOCS
 hs.audiodevice._makeDeviceEmitter = function(device) {
     return new LazyWatcherEmitter("hs.audiodevice device", function() {
-        return device._addWatcher((event) => {
-            device._watcherEmitter.emit(event);
+        return device._addWatcher((event, ...args) => {
+            device._watcherEmitter.emit(event, ...args);
         });
     }, function() {
         device._removeWatcher();

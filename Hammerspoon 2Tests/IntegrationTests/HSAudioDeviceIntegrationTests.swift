@@ -6,6 +6,7 @@
 import Testing
 import JavaScriptCore
 import CoreAudio
+import AVFoundation
 @testable import Hammerspoon_2
 
 private nonisolated func hasNoAudioDevices() -> Bool {
@@ -296,6 +297,40 @@ struct HSAudioDeviceTests {
         """)
         }
 
+        // MARK: - Activity
+
+        @Test("isInUse is a boolean on every device")
+        func testIsInUseIsBoolean() {
+            let harness = makeHarness()
+            harness.expectTrue("hs.audiodevice.all().every(function(d) { return typeof d.isInUse === 'boolean'; })")
+        }
+
+        @Test("isInUse matches CoreAudio's running-somewhere state")
+        @MainActor
+        func testIsInUseMatchesCoreAudio() {
+            let module = HSAudioDeviceModule(engineID: UUID())
+            for dev in module.all() {
+                var a = AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyDeviceIsRunningSomewhere,
+                                                   mScope: kAudioObjectPropertyScopeGlobal,
+                                                   mElement: kAudioObjectPropertyElementMain)
+                var value: UInt32 = 0
+                var size = UInt32(MemoryLayout<UInt32>.size)
+                guard unsafe AudioObjectGetPropertyData(dev.objectID, &a, 0, nil, &size, &value) == noErr else { continue }
+                #expect(dev.isInUse == (value != 0), "\(dev.name)")
+            }
+        }
+
+        @Test("jackConnected is a boolean, or null/undefined if unsupported")
+        func testJackConnectedType() {
+            let harness = makeHarness()
+            harness.expectTrue("""
+            hs.audiodevice.all().every(function(d) {
+                var j = d.jackConnected;
+                return j == null || typeof j === 'boolean';
+            })
+        """)
+        }
+
         // MARK: - Per-device watcher event names
 
         @Test("per-device on() with an unknown event throws and starts nothing")
@@ -314,11 +349,11 @@ struct HSAudioDeviceTests {
                 // Drop the never-started emitter so no JSValue from this context lingers on the device
                 d._removeWatcher();
             """)
-            #expect(harness.evalValue("names")?.toArray() as? [String] == ["vmout", "vmin", "mout", "min", "rate", "dsout", "dsin"])
+            #expect(harness.evalValue("names")?.toArray() as? [String] == ["vmout", "vmin", "mout", "min", "rate", "dsout", "dsin", "balance", "inUse", "jack", "config"])
             // device on() is a native method that invokeMethods into the JS emitter; a caught
             // error must not also reach the context's exceptionHandler.
             #expect(!harness.hasException)
-            #expect(harness.evalString("message") == "hs.audiodevice device.on(): unknown event 'vmOut'. Known events: vmout, vmin, mout, min, rate, dsout, dsin")
+            #expect(harness.evalString("message") == "hs.audiodevice device.on(): unknown event 'vmOut'. Known events: vmout, vmin, mout, min, rate, dsout, dsin, balance, inUse, jack, config")
             #expect(harness.evalInt("listenerCount") == 0)
         }
 
@@ -530,6 +565,59 @@ struct HSAudioDeviceTests {
             let multiCallCount2 = harness.eval("_multiCallCount2") as! Int
             #expect(multiCallCount1 > 0)
             #expect(multiCallCount2 > 0)
+        }
+
+        @Test("device on() and off() cycle is safe for the inUse, jack, balance and config events")
+        func testDeviceWatcherNewEventsOnOffCycle() {
+            let harness = makeHarness()
+            harness.eval("""
+                var _newEventsDev = hs.audiodevice.all()[0];
+                var _newEventsFn = function() {};
+                ['inUse', 'jack', 'balance', 'config'].forEach(function(e) {
+                    _newEventsDev.on(e, _newEventsFn);
+                    _newEventsDev.off(e, _newEventsFn);
+                });
+            """)
+            #expect(!harness.hasException)
+        }
+
+        @Test("device watcher fires inUse with the new state when the device starts and stops running")
+        @MainActor
+        func testDeviceWatcherFiresInUse() async throws {
+            let harness = makeHarness()
+
+            let module = HSAudioDeviceModule(engineID: UUID())
+            // Needs an output device nothing else is using, so starting our own engine is what
+            // flips its state
+            guard let dev = module.defaultOutputDevice(), dev.isOutput, !dev.isInUse else { return }
+
+            harness.eval("""
+            var _inUseStates = [];
+            var _inUseFn = function(inUse) { _inUseStates.push(inUse); };
+            var _inUseDev = hs.audiodevice.defaultOutputDevice();
+            _inUseDev.on('inUse', _inUseFn);
+        """)
+            defer { harness.eval("_inUseDev.off('inUse', _inUseFn);") }
+            #expect(!harness.hasException)
+
+            // Runs the default output device, playing silence
+            let engine = AVAudioEngine()
+            engine.attach(AVAudioPlayerNode())
+            _ = engine.mainMixerNode
+            guard (try? engine.start()) != nil else { return }
+
+            let started = await harness.waitForAsync(timeout: 2.0) {
+                harness.evalBool("_inUseStates.indexOf(true) !== -1") == true
+            }
+            #expect(started)
+            #expect(dev.isInUse)
+
+            engine.stop()
+            let stopped = await harness.waitForAsync(timeout: 3.0) {
+                harness.evalBool("_inUseStates[_inUseStates.length - 1] === false") == true
+            }
+            #expect(stopped)
+            harness.expectTrue("_inUseStates.every(function(s) { return typeof s === 'boolean'; })")
         }
 
         // MARK: - System watcher callbacks
