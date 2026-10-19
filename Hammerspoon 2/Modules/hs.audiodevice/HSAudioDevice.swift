@@ -274,7 +274,7 @@ private func caDataSourceName(_ objectID: AudioObjectID,
     /// const dev = hs.audiodevice.defaultOutputDevice()
     /// if (dev.jackConnected) console.log("Headphones are plugged in")
     /// ```
-    @objc var jackConnected: NSNumber? { get }
+    @objc var jackConnected: JSValue? { get }
 
     // MARK: Channels
 
@@ -630,9 +630,16 @@ nonisolated enum HSAudioDevicePropertyEvent: String, HSEventName {
         isOutput ? kAudioDevicePropertyScopeOutput : kAudioDevicePropertyScopeInput
     }
 
-    @objc var jackConnected: NSNumber? {
-        guard let v = caGetUInt32(objectID, kAudioDevicePropertyJackIsConnected, jackScope) else { return nil }
-        return NSNumber(value: v != 0)
+    /// Whether a jack is connected, or nil if the device doesn't support jack sensing.
+    private var jackState: Bool? {
+        caGetUInt32(objectID, kAudioDevicePropertyJackIsConnected, jackScope).map { $0 != 0 }
+    }
+
+    // A JSValue rather than NSNumber?, because a nil return reaches JS as undefined, not null
+    @objc var jackConnected: JSValue? {
+        guard let context = JSContext.current() else { return nil }
+        guard let state = jackState else { return JSValue(nullIn: context) }
+        return JSValue(bool: state, in: context)
     }
 
     // MARK: - Channels
@@ -918,7 +925,7 @@ nonisolated enum HSAudioDevicePropertyEvent: String, HSEventName {
     private func eventArguments(_ event: HSAudioDevicePropertyEvent) -> [Any] {
         switch event {
         case .inUse: return [isInUse]
-        case .jack: return [jackConnected ?? NSNull()]
+        case .jack: return [jackState ?? NSNull()]
         default: return []
         }
     }

@@ -320,13 +320,13 @@ struct HSAudioDeviceTests {
             }
         }
 
-        @Test("jackConnected is a boolean, or null/undefined if unsupported")
+        @Test("jackConnected is a boolean, or null if unsupported")
         func testJackConnectedType() {
             let harness = makeHarness()
             harness.expectTrue("""
             hs.audiodevice.all().every(function(d) {
                 var j = d.jackConnected;
-                return j == null || typeof j === 'boolean';
+                return j === null || typeof j === 'boolean';
             })
         """)
         }
