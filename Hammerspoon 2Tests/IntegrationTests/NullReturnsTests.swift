@@ -142,13 +142,16 @@ struct NullReturnsTests {
         }
     }
 
-    @Test("A JSValue-returning method returning nil returns null")
-    func testNilJSValueMethodReturnIsNull() throws {
+    @Test("A JSValue-returning getter returning nil returns null")
+    func testNilJSValueGetterIsNull() {
         let harness = makeHarness()
-        harness.loadModule(HSFSModule.self, as: "fs")
-        let path = FileManager.default.temporaryDirectory.appendingPathComponent("NullReturnsTests-\(UUID().uuidString)").path
-        defer { try? FileManager.default.removeItem(atPath: path) }
-        harness.eval("var f = hs.fs.open('\(path)', 'w'); f.close()")
-        harness.expectTrue("f.readLine() === null")
+        harness.loadModule(HSURLEventModule.self, as: "urlevent")
+        // The getter returns Swift nil when no callback is set
+        harness.expectTrue("hs.urlevent.httpCallback === null")
+        harness.eval("hs.urlevent.httpCallback = () => {}")
+        harness.expectTrue("typeof hs.urlevent.httpCallback === 'function'")
+        harness.eval("hs.urlevent.httpCallback = null")
+        harness.expectTrue("hs.urlevent.httpCallback === null")
+        #expect(!harness.hasException)
     }
 }
