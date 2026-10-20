@@ -92,7 +92,8 @@ import Observation
         if hexSanitized.hasPrefix("#") {
             hexSanitized.removeFirst()
         }
-        guard hexSanitized.allSatisfy(\.isHexDigit) else { return nil }
+        // ASCII only: Character.isHexDigit also accepts fullwidth digits, which Scanner stops at
+        guard hexSanitized.allSatisfy({ $0.isASCII && $0.isHexDigit }) else { return nil }
         if hexSanitized.count == 3 {
             hexSanitized = String(hexSanitized.flatMap { [$0, $0] })
         }

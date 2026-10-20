@@ -198,7 +198,7 @@ struct HSCanvasElementDrawingTests {
 
     @Test("parseColor returns nil for values that aren't a usable color")
     func parseColorInvalid() {
-        let values: [Any] = ["#GGG", "#12345", ["hex": "nope"], ["list": "No Such List", "name": "Red"], 42]
+        let values: [Any] = ["#GGG", "#12345", "1234ＦＦ", ["hex": "nope"], ["list": "No Such List", "name": "Red"], 42]
         for raw in values {
             #expect(CanvasElementDrawing.parseColor(raw) == nil, "\(raw) parsed")
         }

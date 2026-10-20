@@ -129,9 +129,10 @@ development), so it's worth committing to memory.
 
 A color object is read by the first of `list`/`name`, `hex`, `white` and
 `hue`/`saturation`/`brightness` it contains, in that order, and otherwise as red/green/blue.
-A color that can't be used (an invalid hex string, an unknown color list, a misspelt key,
-or v1's unsupported `{image}` pattern form) logs a warning when it's set, and draws
-nothing (or black, for a misspelt key, from the keys that are recognised).
+Invalid colors log a warning when they're set. An invalid hex string or unknown color
+list skips a shape's fill or stroke, but `textColor` falls back to black. A misspelt key
+or v1's unsupported `{image}` pattern form still draws from the recognised keys, which
+default to opaque black.
 
 An `HSColor` is read when the canvas draws, but changing it with `set()` doesn't redraw the
 canvas: set the attribute again to show the new color.
