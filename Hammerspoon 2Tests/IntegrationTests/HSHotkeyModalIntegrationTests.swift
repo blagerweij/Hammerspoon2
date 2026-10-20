@@ -111,6 +111,44 @@ struct HSHotkeyModalTests {
             #expect(!harness.hasException)
         }
 
+        // A spy on hs.hotkey.bind, so these tests can tell whether createModal() tried to
+        // bind a trigger at all. A failed bind() returns null, which looks just like "no
+        // trigger" from the modal's side.
+        private func makeHarnessCountingBinds() -> JSTestHarness {
+            let harness = makeHarness()
+            harness.eval("""
+                var bindCalls = 0;
+                var realBind = hs.hotkey.bind;
+                hs.hotkey.bind = function() { bindCalls++; return realBind.apply(hs.hotkey, arguments); };
+            """)
+            return harness
+        }
+
+        @Test("createModal() without a trigger key doesn't try to bind one", arguments: [
+            "hs.hotkey.createModal()",
+            "hs.hotkey.createModal([])",
+            "hs.hotkey.createModal([], '')",
+            "hs.hotkey.createModal([], null)",
+            "hs.hotkey.createModal(undefined, undefined)",
+        ])
+        func testCreateWithoutTriggerDoesNotBind(_ call: String) {
+            let harness = makeHarnessCountingBinds()
+            harness.eval("var m = \(call)")
+            #expect(harness.evalInt("bindCalls") == 0)
+            harness.expectTrue("m._trigger === null")
+            #expect(!harness.hasException)
+        }
+
+        @Test("createModal() with a trigger key binds it, even with no mods")
+        func testCreateWithTriggerBinds() {
+            let harness = makeHarnessCountingBinds()
+            harness.eval("var m = hs.hotkey.createModal(undefined, 'f19')")
+            #expect(harness.evalInt("bindCalls") == 1)
+            harness.expectTrue("m._trigger !== null")
+            harness.eval("m.destroy()")
+            #expect(!harness.hasException)
+        }
+
         @Test("isActive is false before enter()")
         func testIsActiveFalseInitially() {
             let harness = makeHarness()

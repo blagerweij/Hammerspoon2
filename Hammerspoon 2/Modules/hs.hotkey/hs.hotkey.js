@@ -109,8 +109,8 @@ class HSHotkeyModal {
 
 /// Create a new modal hotkey group, optionally entered via a trigger key combination
 /// Parameters:
-///  - mods: Modifier keys for the trigger hotkey (e.g. ["cmd", "shift"]), or an empty array for no trigger
-///  - key: {string | number} Key name or numeric key code for the trigger hotkey (e.g. "h"), or an empty string for no trigger
+///  - mods?: {string[]} Modifier keys for the trigger hotkey (e.g. ["cmd", "shift"]). Omit, or pass an empty array, for no trigger
+///  - key?: {string | number} Key name or numeric key code for the trigger hotkey (e.g. "h"). Omit, or pass null or an empty string, for no trigger
 /// Returns: {HSHotkeyModal} A modal object with bind(), enter(), exit(), destroy() methods, isActive property, and onEnter/onExit callbacks
 /// Example:
 /// ```js
@@ -119,12 +119,17 @@ class HSHotkeyModal {
 /// m.onEnter = () => console.log('modal entered')
 /// m.onExit  = () => console.log('modal exited')
 /// m.bind([], 'escape', () => m.exit())
+///
+/// // A modal with no trigger, entered and exited from your own code
+/// const n = hs.hotkey.createModal()
+/// n.bind([], 'escape', () => n.exit())
+/// n.enter()
 /// ```
 hs.hotkey.createModal = function(mods, key) {
     const modal = new HSHotkeyModal();
 
-    if (key !== '') {
-        const trigger = hs.hotkey.bind(mods, key, () => modal.enter());
+    if (key !== undefined && key !== null && key !== '') {
+        const trigger = hs.hotkey.bind(mods ?? [], key, () => modal.enter());
         if (trigger) modal._trigger = trigger;
     }
 
