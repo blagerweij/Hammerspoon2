@@ -13,6 +13,9 @@ import ObjectiveC
 /// every JSExport method and property getter that returns an object, on each exported class's JS
 /// prototype (and constructor, for class members), so that nil reaches JS as `null`. Members that
 /// return a scalar or `Void` are left alone, so they still return `undefined` where they should.
+/// So are members that return a `JSValue`, since that may be a deliberate JS `undefined` (such as
+/// whatever a user's callback returned) rather than nil; those should build `JSValue(nullIn:)`
+/// themselves where they mean null.
 ///
 /// Must be installed before any user code runs: the wrappers capture `Reflect.apply` and friends
 /// when they're installed, so user scripts can't interfere with them by replacing those later.
@@ -146,35 +149,55 @@ struct NullReturnsInstaller: JSContextInstallable {
         return result
     }
 
-    /// The JS names of a protocol's required methods that return an object. JavaScriptCore only
-    /// exports required methods. Property accessors are in this list too, but they're installed
-    /// as accessors rather than functions, so the JS side skips them.
+    /// The JS names of a protocol's required methods that return an object other than a JSValue.
+    /// JavaScriptCore only exports required methods. Property accessors are in this list too, but
+    /// they're installed as accessors rather than functions, so the JS side skips them.
     private nonisolated static func objectReturningMethods(of proto: Protocol, isInstance: Bool) -> [String] {
         var count: UInt32 = 0
         guard let methods = protocol_copyMethodDescriptionList(proto, true, isInstance, &count) else { return [] }
         defer { free(methods) }
         return UnsafeBufferPointer(start: methods, count: Int(count)).compactMap { method in
-            guard let selector = method.name, returnsObject(method.types) else { return nil }
+            guard let selector = method.name,
+                  returnsObject(extendedTypes(of: proto, selector, isInstance: isInstance) ?? UnsafePointer(method.types))
+            else { return nil }
             return jsName(forSelector: NSStringFromSelector(selector))
         }
     }
 
-    /// The names of a protocol's required properties whose type is an object.
+    /// The names of a protocol's required properties whose type is an object other than a JSValue.
     private nonisolated static func objectReturningGetters(of proto: Protocol, isInstance: Bool) -> [String] {
         var count: UInt32 = 0
         guard let properties = protocol_copyPropertyList2(proto, &count, true, isInstance) else { return [] }
         defer { free(UnsafeMutableRawPointer(properties)) }
         return UnsafeBufferPointer(start: properties, count: Int(count)).compactMap { property in
             guard let attributes = property_getAttributes(property),
-                  String(cString: attributes).hasPrefix("T@") else { return nil }
+                  isObjectType(String(cString: attributes).dropFirst()) else { return nil }
             return String(cString: property_getName(property))
         }
     }
 
-    /// Whether an ObjC method type encoding returns an object, skipping type qualifiers.
+    /// `_protocol_getMethodTypeEncoding`, which JavaScriptCore also uses: unlike
+    /// `protocol_copyMethodDescriptionList`, it gives the extended type encoding, which names the
+    /// class of each object (`@"JSValue"` rather than just `@`).
+    private nonisolated static let getMethodTypeEncoding: (@convention(c) (Protocol, Selector, Bool, Bool) -> UnsafePointer<CChar>?)? = {
+        guard let symbol = dlsym(UnsafeMutableRawPointer(bitPattern: -2), "_protocol_getMethodTypeEncoding") else { return nil }
+        return unsafeBitCast(symbol, to: (@convention(c) (Protocol, Selector, Bool, Bool) -> UnsafePointer<CChar>?).self)
+    }()
+
+    private nonisolated static func extendedTypes(of proto: Protocol, _ selector: Selector, isInstance: Bool) -> UnsafePointer<CChar>? {
+        getMethodTypeEncoding?(proto, selector, true, isInstance)
+    }
+
+    /// Whether an ObjC method type encoding returns an object other than a JSValue, skipping type
+    /// qualifiers.
     nonisolated static func returnsObject(_ types: UnsafePointer<CChar>?) -> Bool {
         guard let types else { return false }
-        return String(cString: types).drop { "rnNoORV".contains($0) }.first == "@"
+        return isObjectType(String(cString: types).drop { "rnNoORV".contains($0) })
+    }
+
+    /// Whether a type encoding starts with an object type other than a JSValue.
+    private nonisolated static func isObjectType(_ encoding: Substring) -> Bool {
+        encoding.first == "@" && !encoding.hasPrefix("@\"JSValue\"")
     }
 
     /// The name JavaScriptCore gives a selector: each colon is dropped and the character after it

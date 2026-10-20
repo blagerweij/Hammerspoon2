@@ -115,6 +115,9 @@ struct NullReturnsTests {
         #expect(!NullReturnsInstaller.returnsObject("v24@0:8@16"))
         #expect(!NullReturnsInstaller.returnsObject("B16@0:8"))
         #expect(!NullReturnsInstaller.returnsObject(nil))
+        // A JSValue may be a deliberate undefined, so it's left alone
+        #expect(NullReturnsInstaller.returnsObject("@\"NSString\"24@0:8@\"NSString\"16"))
+        #expect(!NullReturnsInstaller.returnsObject("@\"JSValue\"24@0:8@\"NSString\"16"))
     }
 
     @Test("The installer finds the app's exported classes")
@@ -127,5 +130,9 @@ struct NullReturnsTests {
         // Scalar-returning and Void members aren't wrapped
         #expect(image?.instanceGetters.contains("template") == false)
         #expect(image?.instanceMethods.contains("set") == false)
+        // Nor are JSValue-returning members, whose undefined may be deliberate
+        let fs = NullReturnsInstaller.exportedClasses.first { $0.name == NSStringFromClass(HSFSModule.self) }
+        #expect(fs?.instanceMethods.contains("read") == true)
+        #expect(fs?.instanceMethods.contains("withFile") == false)
     }
 }

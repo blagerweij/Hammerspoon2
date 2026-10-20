@@ -883,6 +883,15 @@ struct HSFSFileTests {
             #expect(!harness.hasException)
         }
 
+        @Test("withFile returns undefined when the callback returns nothing")
+        func withFileUndefinedResult() throws {
+            let dir = try FileTestDir()
+            let file = try dir.makeFile("a.txt", "first\n")
+            let harness = makeHarness()
+            harness.expectTrue("hs.fs.withFile('\(file)', 'r', f => {}) === undefined")
+            #expect(!harness.hasException)
+        }
+
         @Test("withFile defaults to read mode when the mode is omitted")
         func withFileDefaultMode() throws {
             let dir = try FileTestDir()
