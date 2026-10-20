@@ -631,6 +631,8 @@ extension JSTestHarness {
                 loadModule(HSEventTapModule.self, as: name)
             case "hotkey":
                 loadModule(HSHotkeyModule.self, as: name)
+            case "bluetooth":
+                loadModule(HSBluetoothModule.self, as: name)
             case "usb":
                 loadModule(HSUSBModule.self, as: name)
             case "keyboard":
