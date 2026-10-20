@@ -214,6 +214,16 @@ struct HSEventTapTests {
             #expect(makeHarness().evalTypeOf("hs.eventtap.keyRepeatInterval") == "function")
         }
 
+        @Test("isSecureInputEnabled is a function")
+        func testIsSecureInputEnabledIsFunction() {
+            #expect(makeHarness().evalTypeOf("hs.eventtap.isSecureInputEnabled") == "function")
+        }
+
+        @Test("secureInputPID is a function")
+        func testSecureInputPIDIsFunction() {
+            #expect(makeHarness().evalTypeOf("hs.eventtap.secureInputPID") == "function")
+        }
+
         @Test("makeSystemKeyEvent is a function")
         func testMakeSystemKeyEventIsFunction() {
             #expect(makeHarness().evalTypeOf("hs.eventtap.makeSystemKeyEvent") == "function")
@@ -867,6 +877,24 @@ struct HSEventTapTests {
             let harness = makeHarness()
             harness.eval("var interval = hs.eventtap.keyRepeatInterval()")
             harness.expectTrue("typeof interval === 'number' && interval > 0")
+            #expect(!harness.hasException)
+        }
+
+        // These can't turn Secure Input on to check the "on" case: while it's on, other suites'
+        // keyboard event taps running in parallel would stop seeing keystrokes.
+        @Test("isSecureInputEnabled matches the system's Secure Input state")
+        func testIsSecureInputEnabledMatchesSystem() {
+            let harness = makeHarness()
+            #expect(harness.evalTypeOf("hs.eventtap.isSecureInputEnabled()") == "boolean")
+            #expect(harness.evalBool("hs.eventtap.isSecureInputEnabled()") == IsSecureEventInputEnabled())
+            #expect(!harness.hasException)
+        }
+
+        @Test("secureInputPID is null when Secure Input is off, otherwise a PID or null")
+        func testSecureInputPIDMatchesState() {
+            let harness = makeHarness()
+            harness.eval("var enabled = hs.eventtap.isSecureInputEnabled(); var pid = hs.eventtap.secureInputPID()")
+            harness.expectTrue("enabled ? (pid === null || (Number.isInteger(pid) && pid > 0)) : pid === null")
             #expect(!harness.hasException)
         }
     }

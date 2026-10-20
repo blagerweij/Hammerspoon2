@@ -8,6 +8,7 @@ import JavaScriptCore
 import JavaScriptCoreExtras
 import CoreGraphics
 import AppKit
+import Carbon
 
 // MARK: - Module API
 
@@ -422,6 +423,39 @@ import AppKit
     /// console.log("Key repeat interval: " + hs.eventtap.keyRepeatInterval())
     /// ```
     @objc func keyRepeatInterval() -> Double
+
+    /// Returns whether Secure Input is currently turned on.
+    ///
+    /// While Secure Input is on, macOS hides keystrokes from other apps, so `hs.eventtap`
+    /// watchers and hotkeys see no key events. Apps turn it on for password fields, and some
+    /// apps (terminals, password managers) can leave it on by mistake.
+    ///
+    /// - Returns: `true` if any process has Secure Input turned on, otherwise `false`
+    /// - Example:
+    /// ```js
+    /// if (hs.eventtap.isSecureInputEnabled()) {
+    ///     console.warn("Secure Input is on; keyboard event taps won't see keystrokes")
+    /// }
+    /// ```
+    @objc func isSecureInputEnabled() -> Bool
+
+    /// Returns the process ID of an app that has Secure Input turned on, to help track down
+    /// which app is blocking keystrokes.
+    ///
+    /// macOS doesn't document this value. When more than one process has Secure Input on, only
+    /// one of them is reported, and it isn't always the one that turned it on most recently, so
+    /// treat it as a starting point rather than a definitive answer.
+    ///
+    /// - Returns: {number | null} A process ID, or `null` if Secure Input is off or macOS doesn't say which process has it
+    /// - Example:
+    /// ```js
+    /// const pid = hs.eventtap.secureInputPID()
+    /// if (pid !== null) {
+    ///     const app = hs.application.fromPID(pid)
+    ///     console.warn("Secure Input is on, probably because of " + (app ? app.title : "PID " + pid))
+    /// }
+    /// ```
+    @objc func secureInputPID() -> NSNumber?
 
     // MARK: Hotkey binding
 
@@ -939,6 +973,22 @@ import AppKit
 
     @objc func keyRepeatInterval() -> Double {
         return NSEvent.keyRepeatInterval
+    }
+
+    @objc func isSecureInputEnabled() -> Bool {
+        return IsSecureEventInputEnabled()
+    }
+
+    @objc func secureInputPID() -> NSNumber? {
+        // The window server only includes this key in the session dictionary while Secure Input
+        // is on. It's the same value `ioreg -l | grep kCGSSessionSecureInputPID` reports.
+        guard IsSecureEventInputEnabled(),
+              let session = CGSessionCopyCurrentDictionary() as? [String: Any],
+              let pid = session["kCGSSessionSecureInputPID"] as? Int,
+              pid > 0 else {
+            return nil
+        }
+        return NSNumber(value: pid)
     }
 
     // MARK: - Private helpers

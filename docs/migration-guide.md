@@ -231,6 +231,9 @@ return `hs.eventtap.consume` to suppress the event or `hs.eventtap.emit` to pass
 always pass through. Call `hs.eventtap.removeWatcher(tap)` with the watcher `addWatcher()`
 returned (not the callback) to tear it down. Like every started watcher in Hammerspoon 2, it
 keeps running until you stop or remove it, whether or not you keep a reference to it.
+`hs.eventtap.isSecureInputEnabled()` is unchanged, and the new `hs.eventtap.secureInputPID()`
+gives the process ID of an app that has Secure Input on (or `null`), so you can tell the user
+which app is blocking keystrokes.
 
 **`hs.http`** — every request method returns a Promise resolving to `{status, body, headers}`;
 there's no callback argument any more. A network failure *resolves* with `status: -1`, it
