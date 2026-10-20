@@ -953,12 +953,13 @@ import SwiftUI
             }
             string = text.toString()
             if source.isNumber {
-                let index = Int(source.toInt32())
-                guard index >= 0 && index < elementStore.elements.count else {
-                    AKWarning("hs.canvas: minimumTextSize() index \(index) is out of bounds (the canvas has \(elementStore.elements.count) elements)")
+                // Bounds-checked as a double: toInt32() would wrap an index past 2^32 back into range
+                let index = source.toDouble()
+                guard index >= 0 && index < Double(elementStore.elements.count) else {
+                    AKWarning("hs.canvas: minimumTextSize() index \(source.toString() ?? "") is out of bounds (the canvas has \(elementStore.elements.count) elements)")
                     return [:]
                 }
-                attributes = elementStore.elements[index]
+                attributes = elementStore.elements[Int(index)]
             } else if source.isObject, let dict = source.toDictionary() as? [String: Any] {
                 attributes = dict
             } else if source.isUndefined || source.isNull {

@@ -580,6 +580,9 @@ struct HSCanvasTests {
             "c.minimumTextSize(0, 42)",
             "c.minimumTextSize(true, 'Hammerspoon')",
             "c.minimumTextSize()",
+            "c.minimumTextSize(4294967296, 'Hammerspoon')",
+            "c.minimumTextSize(-1, 'Hammerspoon')",
+            "c.minimumTextSize(NaN, 'Hammerspoon')",
         ])
         func minimumTextSizeInvalidArguments(call: String) {
             let harness = makeHarness()
