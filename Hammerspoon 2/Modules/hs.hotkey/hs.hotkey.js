@@ -109,8 +109,8 @@ class HSHotkeyModal {
 
 /// Create a new modal hotkey group, optionally entered via a trigger key combination
 /// Parameters:
-///  - mods?: {string[]} Modifier keys for the trigger hotkey (e.g. ["cmd", "shift"]). Omit, or pass an empty array, for no trigger
-///  - key?: {string | number} Key name or numeric key code for the trigger hotkey (e.g. "h"). Omit, or pass null or an empty string, for no trigger
+///  - mods?: {string[]} Modifier keys for the trigger hotkey (e.g. ["cmd", "shift"]). Defaults to an empty array (no modifiers) when omitted
+///  - key?: {string | number} Key name or numeric key code for the trigger hotkey (e.g. "h"). Omit it, or pass null or an empty string, for a modal with no trigger
 /// Returns: {HSHotkeyModal} A modal object with bind(), enter(), exit(), destroy() methods, isActive property, and onEnter/onExit callbacks
 /// Example:
 /// ```js
