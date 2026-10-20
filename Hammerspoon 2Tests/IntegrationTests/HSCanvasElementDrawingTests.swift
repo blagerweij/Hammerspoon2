@@ -102,6 +102,50 @@ struct HSCanvasElementDrawingTests {
         #expect(path.boundingRect == CGRect(x: 20, y: 30, width: 10, height: 10))
     }
 
+    // MARK: - Rounded rectangles
+
+    private func roundedRectPath(_ radii: Any?) throws -> Path {
+        var element: [String: Any] = ["type": "rectangle", "frame": ["x": 0, "y": 0, "w": 100, "h": 100]]
+        element["roundedRectRadii"] = radii
+        return try #require(CanvasElementDrawing.pathFor(element: element, containerSize: CGSize(width: 100, height: 100)))
+    }
+
+    @Test("roundedRectRadii as a number rounds every corner by that radius")
+    func roundedRectRadiiNumber() throws {
+        let path = try roundedRectPath(20)
+        #expect(!path.contains(CGPoint(x: 1, y: 1)))
+        #expect(!path.contains(CGPoint(x: 99, y: 99)))
+        #expect(path.contains(CGPoint(x: 50, y: 1)))
+    }
+
+    @Test("roundedRectRadii as {xRadius, yRadius} gives elliptical corners")
+    func roundedRectRadiiXY() throws {
+        let path = try roundedRectPath(["xRadius": 40, "yRadius": 2])
+        // Only 2pt tall, so a point 10pt down the left edge is inside...
+        #expect(path.contains(CGPoint(x: 2, y: 10)))
+        // ...but 40pt wide, so a point 10pt along the top edge is cut off
+        #expect(!path.contains(CGPoint(x: 10, y: 0.5)))
+        #expect(!path.contains(CGPoint(x: 90, y: 99.5)))
+    }
+
+    @Test("roundedRectRadii that's missing or not a number or object leaves the corners square")
+    func roundedRectRadiiSquare() throws {
+        #expect(try roundedRectPath(nil).contains(CGPoint(x: 1, y: 1)))
+        #expect(try roundedRectPath("20").contains(CGPoint(x: 1, y: 1)))
+    }
+
+    @Test("cornerRadiiProblem accepts numbers and {xRadius, yRadius}, and reports anything else")
+    func cornerRadiiProblem() {
+        let valid: [Any] = [10, ["xRadius": 4, "yRadius": 8], ["xRadius": 4], NSNull()]
+        for raw in valid {
+            #expect(CanvasElementDrawing.cornerRadiiProblem(raw) == nil, "\(raw) was reported")
+        }
+        let invalid: [Any] = ["10", ["x": 4, "y": 8], ["xRadius": "4"], [4, 8]]
+        for raw in invalid {
+            #expect(CanvasElementDrawing.cornerRadiiProblem(raw) != nil, "\(raw) wasn't reported")
+        }
+    }
+
     // MARK: - Gradients
 
     @Test("gradientShading returns nil without fillGradient")

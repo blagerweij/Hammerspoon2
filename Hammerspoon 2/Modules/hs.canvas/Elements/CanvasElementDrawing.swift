@@ -127,8 +127,8 @@ enum CanvasElementDrawing {
         case .rectangle:
             let rect = resolveFrame(element["frame"], containerSize: containerSize)
                 ?? CGRect(origin: .zero, size: containerSize)
-            if let radius = element["roundedRectRadii"] as? NSNumber {
-                rawPath = Path(roundedRect: rect, cornerRadius: CGFloat(radius.doubleValue))
+            if let cornerSize = cornerSize(element["roundedRectRadii"]) {
+                rawPath = Path(roundedRect: rect, cornerSize: cornerSize)
             } else {
                 rawPath = Path(rect)
             }
@@ -480,6 +480,36 @@ enum CanvasElementDrawing {
         return (CGPoint(x: cx, y: cy), radius)
     }
 
+    /// Parses `roundedRectRadii`: a number for circular corners, or v1's `{xRadius, yRadius}`
+    /// for elliptical ones (a missing radius is 0). Returns `nil`, for square corners, if
+    /// `raw` is neither.
+    static func cornerSize(_ raw: Any?) -> CGSize? {
+        if let radius = raw as? NSNumber {
+            return CGSize(width: radius.doubleValue, height: radius.doubleValue)
+        }
+        guard let dict = raw as? [String: Any] else { return nil }
+        let x = (dict["xRadius"] as? NSNumber)?.doubleValue ?? 0
+        let y = (dict["yRadius"] as? NSNumber)?.doubleValue ?? 0
+        return CGSize(width: x, height: y)
+    }
+
+    /// Describes why a `roundedRectRadii` value won't round the corners as intended, or
+    /// returns `nil` if it's fine
+    static func cornerRadiiProblem(_ raw: Any) -> String? {
+        if raw is NSNull || raw is NSNumber { return nil }
+        guard let dict = raw as? [String: Any] else {
+            return "\(raw) isn't a radius: use a number or {xRadius, yRadius}"
+        }
+        let unknown = dict.keys.filter { $0 != "xRadius" && $0 != "yRadius" }.sorted()
+        if !unknown.isEmpty {
+            return "unrecognised keys \(unknown.joined(separator: ", ")) (supported: xRadius, yRadius)"
+        }
+        for (key, value) in dict where !(value is NSNumber) {
+            return "\(key) must be a number, not \(value)"
+        }
+        return nil
+    }
+
     /// Parses a color in any of the forms canvas accepts, or returns `nil` if `raw` isn't one.
     /// Called while drawing, so it never logs: `colorProblem(_:)` reports bad colors once, when
     /// they're set. The forms are v1's `hs.drawing.color` tables plus the hex strings and
@@ -593,6 +623,10 @@ enum CanvasElementDrawing {
         if colorAttributes.contains(key) {
             if let problem = colorProblem(value) {
                 AKWarning("hs.canvas: \(caller)(): \(key): \(problem)")
+            }
+        } else if key == "roundedRectRadii" {
+            if let problem = cornerRadiiProblem(value) {
+                AKWarning("hs.canvas: \(caller)(): roundedRectRadii: \(problem)")
             }
         } else if key == "fillGradientColors" {
             guard let colors = value as? [Any] else {

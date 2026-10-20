@@ -176,7 +176,7 @@ Any element that takes `fillColor` can use a gradient instead:
 | Property | Default | Notes |
 |---|---|---|
 | `frame` | the whole canvas | `{x, y, w, h}` |
-| `roundedRectRadii` | none (square corners) | corner radius, applied to all four corners |
+| `roundedRectRadii` | none (square corners) | a number for circular corners, or v1's `{xRadius, yRadius}` for elliptical ones; applied to all four corners |
 
 ### `circle`
 
