@@ -230,9 +230,12 @@ from the previous one (a cubic Bézier) instead of drawing a straight line:
 | `textAlignment` | `natural` | `left`, `right`, `center`, `justified`, or `natural`. `natural`/`justified` resolve against the text's own writing direction — for right-to-left scripts (Hebrew, Arabic, ...), that means flush with the frame's *right* edge, not the left, the way it does for left-to-right text. `left`/`right`/`center` are always literal, regardless of script |
 | `textLineBreak` | `wordWrap` | `wordWrap`, `charWrap`, `clip`, `truncateHead`, `truncateMiddle`, `truncateTail` — `wordWrap`/`charWrap` allow multiple lines; the rest keep the text to one line, either clipping it or inserting `…` |
 
-`HSCanvas.minimumTextSize(index, text)` measures how much space a string would need using an
-existing text element's font attributes, without changing what's on screen — handy for
-sizing a `frame` to fit before setting it.
+`HSCanvas.minimumTextSize()` measures how much space a string would need, without changing
+what's on screen — handy for sizing a `frame` to fit before setting it. Pass an element index
+to use that element's font attributes (`minimumTextSize(0, "Hello")`), a plain object of font
+attributes to measure before the element exists (`minimumTextSize({ textSize: 24 }, "Hello")`),
+or just the string to use the defaults (`minimumTextSize("Hello")`). An out-of-range index
+logs a warning and returns `{}`.
 
 ### `image`
 

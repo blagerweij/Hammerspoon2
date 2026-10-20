@@ -302,23 +302,37 @@ import SwiftUI
     /// - Returns: {object} A `{x, y, w, h}` dictionary
     @objc func elementBounds(_ index: Int) -> [String: Any]
 
-    /// The smallest size that can fully render a string of text, using a text element's
-    /// font attributes (`textFont`/`textSize`/`textWeight`/`textDesign`/`textItalic`)
+    /// The smallest size that can fully render a string of text, using the font attributes
+    /// (`textFont`/`textSize`/`textWeight`/`textDesign`/`textItalic`) of an element, of an
+    /// attributes object, or the defaults
     ///
-    /// Mirrors v1's `hs.canvas:minimumTextSize()`. Multi-line strings (separated by `\n`)
-    /// are measured correctly -- the height covers every line and the width is the longest
-    /// line's width, not a fixed single-line size.
+    /// Mirrors v1's `hs.canvas:minimumTextSize([index], text)`. It can be called three ways:
+    /// - `minimumTextSize(index, text)` measures with the font attributes of the element at
+    ///   `index`. Any element type works; attributes it doesn't set use their defaults.
+    /// - `minimumTextSize(attributes, text)` measures with the font attributes in a plain
+    ///   object, so text can be measured before any element exists.
+    /// - `minimumTextSize(text)` measures with the default font attributes (the system font
+    ///   at size 27, as a text element with no font attributes would be drawn).
+    ///
+    /// Multi-line strings (separated by `\n`) are measured correctly -- the height covers every
+    /// line and the width is the longest line's width, not a fixed single-line size.
     /// - Parameters:
-    ///   - index: The index of a text element in the canvas whose font attributes to measure with
-    ///   - text: The string to measure -- it doesn't need to match the element's own `text`
-    /// - Returns: {object} A `{w, h}` dictionary, or `{}` if `index` is out of bounds
+    ///   - source: {number | {textFont?: string, textSize?: number, textWeight?: string, textDesign?: string, textItalic?: boolean} | string} The index of an element whose font attributes to measure with, an object of font attributes, or the string to measure (to use the default font attributes)
+    ///   - text?: {string} The string to measure -- it doesn't need to match the element's own `text`. Omitted when `source` is the string
+    /// - Returns: {object} A `{w, h}` dictionary, or `{}` (with a warning logged) if `index` is out of bounds or the arguments are invalid
     /// - Example:
     /// ```js
-    /// c.appendElements([{ type: "text", text: "placeholder", textFont: "Menlo-Bold", textSize: 24 }])
-    /// const size = c.minimumTextSize(0, "Hello\nWorld")
-    /// c.setElementAttribute(0, "frame", { x: 10, y: 10, w: size.w, h: size.h })
+    /// // Size a text element to fit its text, before it's added to the canvas
+    /// const attributes = { textFont: "Menlo-Bold", textSize: 24 }
+    /// const size = c.minimumTextSize(attributes, "Hello\nWorld")
+    /// c.appendElements([{ type: "text", text: "Hello\nWorld", ...attributes,
+    ///                     frame: { x: 10, y: 10, w: size.w, h: size.h } }])
+    ///
+    /// // Or measure with an existing element's font, or the default font
+    /// const fromElement = c.minimumTextSize(0, "Goodbye")
+    /// const withDefaults = c.minimumTextSize("Goodbye")
     /// ```
-    @objc func minimumTextSize(_ index: Int, _ text: String) -> [String: Any]
+    @objc func minimumTextSize(_ source: JSValue, _ text: JSValue) -> [String: Any]
 
     // MARK: Mouse interaction
 
@@ -925,9 +939,36 @@ import SwiftUI
         return ["x": rect.origin.x, "y": rect.origin.y, "w": rect.size.width, "h": rect.size.height]
     }
 
-    @objc func minimumTextSize(_ index: Int, _ text: String) -> [String: Any] {
-        guard index >= 0 && index < elementStore.elements.count else { return [:] }
-        let size = CanvasElementDrawing.minimumTextSize(text: text, element: elementStore.elements[index])
+    @objc func minimumTextSize(_ source: JSValue, _ text: JSValue) -> [String: Any] {
+        let attributes: [String: Any]
+        let string: String
+        if source.isString && (text.isUndefined || text.isNull) {
+            // minimumTextSize(text): v1's form with the index left out
+            attributes = [:]
+            string = source.toString()
+        } else {
+            guard text.isString else {
+                AKWarning("hs.canvas: minimumTextSize() needs a string to measure")
+                return [:]
+            }
+            string = text.toString()
+            if source.isNumber {
+                let index = Int(source.toInt32())
+                guard index >= 0 && index < elementStore.elements.count else {
+                    AKWarning("hs.canvas: minimumTextSize() index \(index) is out of bounds (the canvas has \(elementStore.elements.count) elements)")
+                    return [:]
+                }
+                attributes = elementStore.elements[index]
+            } else if source.isObject, let dict = source.toDictionary() as? [String: Any] {
+                attributes = dict
+            } else if source.isUndefined || source.isNull {
+                attributes = [:]
+            } else {
+                AKWarning("hs.canvas: minimumTextSize() needs an element index or an object of font attributes")
+                return [:]
+            }
+        }
+        let size = CanvasElementDrawing.minimumTextSize(text: string, element: attributes)
         return ["w": size.width, "h": size.height]
     }
 

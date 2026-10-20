@@ -529,6 +529,68 @@ struct HSCanvasTests {
             #expect(!harness.hasException)
             harness.expectEqual("keyCount", 0)
         }
+
+        @Test("minimumTextSize(text) measures with the default font attributes on an empty canvas")
+        func minimumTextSizeTextOnly() {
+            let harness = makeHarness()
+            harness.eval("""
+                var empty = hs.canvas.create({x: 0, y: 0, w: 200, h: 200})
+                var defaults = empty.minimumTextSize("Hammerspoon")
+                var c = hs.canvas.create({x: 0, y: 0, w: 200, h: 200})
+                c.appendElements([{ type: "text", text: "placeholder" }])
+                var fromElement = c.minimumTextSize(0, "Hammerspoon")
+                """)
+            #expect(!harness.hasException)
+            #expect(harness.evalDouble("defaults.w") ?? 0 > 0)
+            #expect(harness.evalDouble("defaults.w") == harness.evalDouble("fromElement.w"))
+            #expect(harness.evalDouble("defaults.h") == harness.evalDouble("fromElement.h"))
+        }
+
+        @Test("minimumTextSize(attributes, text) measures with an object's font attributes")
+        func minimumTextSizeAttributes() {
+            let harness = makeHarness()
+            harness.eval("""
+                var c = hs.canvas.create({x: 0, y: 0, w: 200, h: 200})
+                c.appendElements([{ type: "text", text: "placeholder", textSize: 40 }])
+                var fromObject = c.minimumTextSize({ textSize: 40 }, "Hammerspoon")
+                var fromElement = c.minimumTextSize(0, "Hammerspoon")
+                var small = c.minimumTextSize({ textSize: 10 }, "Hammerspoon")
+                """)
+            #expect(!harness.hasException)
+            #expect(harness.evalDouble("fromObject.w") == harness.evalDouble("fromElement.w"))
+            #expect(harness.evalDouble("fromObject.h") == harness.evalDouble("fromElement.h"))
+            harness.expectTrue("small.w < fromObject.w && small.h < fromObject.h")
+        }
+
+        @Test("minimumTextSize() uses the font attributes of a non-text element")
+        func minimumTextSizeNonTextElement() {
+            let harness = makeHarness()
+            harness.eval("""
+                var c = hs.canvas.create({x: 0, y: 0, w: 200, h: 200})
+                c.appendElements([{ type: "rectangle", action: "fill", textSize: 40 }])
+                var fromRectangle = c.minimumTextSize(0, "Hammerspoon")
+                var fromObject = c.minimumTextSize({ textSize: 40 }, "Hammerspoon")
+                """)
+            #expect(!harness.hasException)
+            #expect(harness.evalDouble("fromRectangle.w") == harness.evalDouble("fromObject.w"))
+        }
+
+        @Test("minimumTextSize() returns an empty object for invalid arguments", arguments: [
+            "c.minimumTextSize(0)",
+            "c.minimumTextSize(0, 42)",
+            "c.minimumTextSize(true, 'Hammerspoon')",
+            "c.minimumTextSize()",
+        ])
+        func minimumTextSizeInvalidArguments(call: String) {
+            let harness = makeHarness()
+            harness.eval("""
+                var c = hs.canvas.create({x: 0, y: 0, w: 200, h: 200})
+                c.appendElements([{ type: "text", text: "placeholder" }])
+                var keyCount = Object.keys(\(call)).length
+                """)
+            #expect(!harness.hasException)
+            harness.expectEqual("keyCount", 0)
+        }
     }
 
     // MARK: - Mouse interaction, transforms, and full-parity extras (M4/M5)
