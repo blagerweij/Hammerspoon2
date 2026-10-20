@@ -175,9 +175,11 @@ struct HSCanvasTests {
                     void 0
                 """)
                 image = harness.evalValue("img")?.toObjectOf(HSImage.self) as? HSImage
+                // Checked while JS still references the image: once it doesn't, a collection
+                // could free it at any point.
+                #expect(image != nil, "The image must have been made for the test to mean anything")
                 harness.eval("img = null; src.destroy(); c.destroy(); void 0")
             }
-            #expect(image != nil, "The image must have been made for the test to mean anything")
             #expect(harness.evalInt("c.elementCount()") == 0)
 
             harness.collectGarbage()
