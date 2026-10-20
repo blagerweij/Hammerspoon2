@@ -16,11 +16,12 @@ diving into specifics:
   `JSON.stringify` replace `hs.json`, `Math` replaces `hs.math`, native Unicode-aware strings
   replace `hs.utf8`, `console.log`/`JSON.stringify(x, null, 2)` replace `hs.inspect`, and
   array methods (`.map`/`.filter`/`.reduce`/...) replace `hs.fnutils`.
-- **`hs.ui` replaces the entire drawing/canvas/webview/dialog family.** `hs.drawing`,
-  `hs.canvas`, `hs.webview`, `hs.dialog`, `hs.alert`, and `hs.styledtext` are all gone,
-  replaced by one SwiftUI-backed declarative UI module. This is the single biggest
-  programming-model change in the whole migration — see [Rebuilding UI with hs.ui](#rebuilding-ui-with-hsui)
-  below.
+- **`hs.ui` replaces most of the drawing/webview/dialog family.** `hs.drawing`,
+  `hs.webview`, `hs.dialog`, `hs.alert`, and `hs.styledtext` are all gone, replaced by one
+  SwiftUI-backed declarative UI module. This is the single biggest programming-model change
+  in the whole migration — see [Rebuilding UI with hs.ui](#rebuilding-ui-with-hsui) below.
+  The exception is **`hs.canvas`**, which survives as a close port of v1's imperative,
+  element-list drawing surface — see [hs.canvas](#hscanvas) below.
 - **Spoons exist in v2, but reshaped.** `hs.loadSpoon()` is back, `init()` is still called
   automatically, and Spoons install as `.spoon2` bundles (not `.spoon`) — but `start()`/`stop()`/
   `bindHotkeys()` are conventions now rather than a built-in lifecycle, and there's no
@@ -119,7 +120,8 @@ for what changed within it.
 | `hs.brightness` | → `hs.screen` | `getBrightness()`/`setBrightness()`, see [details](#hsscreen) |
 | `hs.caffeinate` (+`.watcher`) | → `hs.power` | [details](#hspower) |
 | `hs.camera` | Present | watcher folded in |
-| `hs.canvas` (+`.matrix`) | → `hs.ui` | [details](#rebuilding-ui-with-hsui); matrix/transform math gone |
+| `hs.canvas` | Present | close port; some renames and missing element attributes, see [details](#hscanvas) |
+| `hs.canvas.matrix` | Gone | transforms are plain `{m11, m12, m21, m22, tX, tY}` objects, see [details](#hscanvas) |
 | `hs.chooser` | Present | construction/callback wiring changed |
 | `hs.console` | → `console`, `hs` | [details](#hsconsole) |
 | `hs.crash` | Gone | dev-only hooks, not expected to return |
@@ -128,7 +130,7 @@ for what changed within it.
 | `hs.distributednotifications` | Gone | no general-purpose NSDistributedNotificationCenter wrapper |
 | `hs.doc` (+`.builder`,`.hsdocs`,`.markdown`) | Gone | `hs.docs` is unrelated (read-only bundled-doc viewer) |
 | `hs.dockicon` | Gone | no Dock icon control |
-| `hs.drawing` (+`.color`) | → `hs.ui` | [details](#rebuilding-ui-with-hsui) |
+| `hs.drawing` (+`.color`) | → `hs.ui` or `hs.canvas` | [details](#rebuilding-ui-with-hsui) |
 | `hs.eventtap` (+`.event`) | Present | `.event` folded in; consume/suppress via a callback return value, not a settable property |
 | `hs.expose` | Gone | no window-overlay/hint-code equivalent |
 | `hs.fnutils` | Gone | native JS array methods |
@@ -504,16 +506,16 @@ only the general "layout changed" event is.
 
 ## Rebuilding UI with hs.ui
 
-This is the biggest single change in the whole migration. `hs.alert`, `hs.canvas`
-(+`.matrix`), `hs.dialog` (+`.color`), `hs.drawing` (+`.color`), `hs.image`, `hs.styledtext`,
-and `hs.webview` (+`.datastore`, `.toolbar`, `.usercontent`) are all gone, replaced by one
-new module: **`hs.ui`**.
+This is the biggest single change in the whole migration. `hs.alert`, `hs.dialog`
+(+`.color`), `hs.drawing` (+`.color`), `hs.image`, `hs.styledtext`, and `hs.webview`
+(+`.datastore`, `.toolbar`, `.usercontent`) are all gone, replaced by one new module:
+**`hs.ui`**. (`hs.canvas` is the one member of the family that *wasn't* folded in — it still
+exists as its own module, see [hs.canvas](#hscanvas).)
 
 In v1, this whole family was **imperative**: you created an object
-(`hs.drawing.rectangle(rect)`, `hs.canvas.new(rect)`, `hs.webview.new(rect)`), got a handle
-back, and mutated it over time with setter calls (`rect:setFillColor(...)`,
-`canvas:appendElements(...)`). Each drawing primitive, canvas, dialog, and webview was its
-own independently managed screen object.
+(`hs.drawing.rectangle(rect)`, `hs.webview.new(rect)`), got a handle back, and mutated it
+over time with setter calls (`rect:setFillColor(...)`). Each drawing primitive, dialog, and
+webview was its own independently managed screen object.
 
 `hs.ui` replaces all of that with two ideas:
 
@@ -524,8 +526,8 @@ own independently managed screen object.
    (`.fill()`, `.cornerRadius()`, `.frame()`, `.font()`, `.foregroundColor()`) and
    interaction (`.onClick()`, `.onHover()`) calls applying to whatever preceded them.
    Containers close with `.end()`. You build the tree once and call `.show()` — there's no
-   "append/remove element" API like `hs.canvas` had; to change *structure*, you rebuild and
-   re-show.
+   "append/remove element" API; to change *structure*, you rebuild and re-show (or use
+   `hs.canvas`, which does have one).
 2. **Reactive values for anything that changes after the window is shown.** Instead of
    calling a setter on a screen object, create a shared reactive value — `HSColor.hex(...)`,
    `hs.ui.string(...)` (an `HSString`), or an `HSImage` — pass it into `.fill()`/`.text()`/
@@ -535,11 +537,11 @@ own independently managed screen object.
 
 Where each v1 module's job landed:
 
-- **`hs.drawing` / `hs.canvas`** → `.rectangle()`/`.circle()`/`.text()`/`.image()` elements in
-  the builder. There's no equivalent of `hs.canvas`'s arbitrary paths, arcs, or
-  compositing/blend modes — the shape vocabulary is currently just rectangle and circle.
-- **`hs.canvas.matrix`** → gone entirely; no 2D transform/matrix math (rotate/scale/skew)
-  exists anywhere in `hs.ui`.
+- **`hs.drawing`** → either `.rectangle()`/`.circle()`/`.text()`/`.image()` elements in the
+  `hs.ui` builder, or — if you relied on absolute positioning, arcs, lines, window levels, or
+  click-through — an `hs.canvas` with one element per former drawing object. `hs.ui`'s shape
+  vocabulary is just rectangle and circle, with no paths, arcs, or blend modes; `hs.canvas`
+  has all of those.
 - **`hs.drawing.color` / `hs.dialog.color`** → the shared `HSColor` type
   (`HSColor.hex("#RRGGBB")`) used everywhere a color is accepted. No system color-picker
   panel (`NSColorPanel`) is wrapped.
@@ -552,9 +554,9 @@ Where each v1 module's job landed:
   non-blocking. Code written as `local result = hs.dialog.blockAlert(...)` needs restructuring
   around a callback.
 - **`hs.image`** → the `HSImage` reactive type. Loading covers most of v1 (`.fromPath()`,
-  `.fromName()`, plus new capabilities like `.fromSymbol()` for SF Symbols), but there's no
-  general "draw shapes/text into an image and rasterize" compositing API, since canvas
-  rasterization itself doesn't exist.
+  `.fromName()`, plus new capabilities like `.fromSymbol()` for SF Symbols). There's no
+  `hs.image`-level drawing API; to composite shapes and text into an image, draw them on an
+  `hs.canvas` and call `imageFromCanvas()`, as in v1.
 - **`hs.styledtext`** → styling calls directly on a `.text()` element
   (`.text("Hello").font(HSFont.title()).foregroundColor("#FFFFFF")`) instead of an
   attributed-string object built from a table of runs. There's no way to mix multiple
@@ -583,6 +585,132 @@ Where each v1 module's job landed:
   callback's return value (or its Promise's result), so the page can get a reply.
   Injecting user scripts (v1's `injectScript`) isn't supported; use `.execJS()` after the page
   loads instead.
+
+## hs.canvas
+
+Unlike the rest of v1's drawing family, `hs.canvas` wasn't folded into `hs.ui` — it's still a
+standalone module, deliberately kept close to v1 so that canvas-heavy configs and Spoons port
+with mostly mechanical changes. A canvas is still a borderless window whose contents are a
+plain array of element objects (`{type, action, fillColor, frame, ...}` — Lua tables become
+JS object literals), drawn in order through the same `fill`/`stroke`/`build`/`clip`/`skip`/
+`resetClip` pipeline, with the same element types (`rectangle`, `circle`, `oval`, `arc`,
+`ellipticalArc`, `segments`, `points`, `text`, `image`, `canvas`), gradients, blend modes,
+per-element mouse tracking, and `windowLevels`/`windowBehaviors`/`compositeTypes` constants.
+The [hs.canvas guide](canvas-guide.html) documents every element attribute; this section
+covers only what changed.
+
+A typical v1 snippet:
+
+```lua
+local c = hs.canvas.new{x = 100, y = 100, w = 200, h = 100}
+c:appendElements({
+    type = "rectangle", action = "fill", roundedRectRadii = {xRadius = 8, yRadius = 8},
+    fillColor = {hex = "#336699"},
+}, {
+    type = "text", text = "Hello", textSize = 20, textColor = {white = 1},
+})
+c:level(hs.canvas.windowLevels.overlay)
+c[2].text = "Hello, world"
+c:show()
+-- later
+c:delete()
+```
+
+becomes:
+
+```js
+// y now counts up from the bottom: on a 900pt-tall primary screen, v1's y = 100 becomes
+// 900 - 100 - 100 = 700 (see "Window position" below)
+const c = hs.canvas.create({x: 100, y: 700, w: 200, h: 100})
+c.appendElements([
+    { type: "rectangle", action: "fill", roundedRectRadii: 8,
+      fillColor: { red: 0.2, green: 0.4, blue: 0.6, alpha: 1 } },
+    { type: "text", text: "Hello", textSize: 20, textColor: { red: 1, green: 1, blue: 1, alpha: 1 } },
+])
+c.levelValue(hs.canvas.windowLevels.overlay)
+c.setElementAttribute(1, "text", "Hello, world")
+c.show()
+// later
+c.destroy()
+```
+
+**Renamed methods.** A few v1 names can't be used as JavaScript/Objective-C method names, and
+v1's combined getter/setter methods (`c:frame()` vs. `c:frame(rect)`) are split into separate
+get and set methods, since a JS-exported method takes one fixed set of argument types:
+
+| v1 | v2 |
+|---|---|
+| `hs.canvas.new(rect)` | `hs.canvas.create(rect)` |
+| `c:delete([fade])` | `c.destroy([fade])` |
+| `c:copy()` | `c.duplicate()` |
+| `c:frame([rect])`, `c:topLeft([point])`, `c:size([size])` | `frame()`/`setFrame()`, `topLeft()`/`setTopLeft()`, `size()`/`setSize()` |
+| `c:alpha([a])` | `alpha()`/`setAlpha(a)` |
+| `c:level(nameOrNumber)` | `level(name)` or `levelValue(number)` |
+| `c:behavior(number)` / `c:behaviorAsLabels(names)` | `behaviorValue(number)` / `behaviorList(names)` (or `behavior(name)` for just one) |
+| `c:elementAttribute(i, key, value)` (setter form) | `setElementAttribute(i, key, value)`; `removeElementAttribute(i, key)` replaces setting it to `nil` |
+| `c:transformation([matrix])` | `setTransformation(matrix)` / `clearTransformation()` |
+| `hs.canvas.useCustomAccessibilitySubrole(flag)` | `c.setAccessibilitySubrole(subrole)`, per canvas |
+
+Everything else that exists in both — `show`/`hide` (with fade times), `appendElements`/
+`insertElement`/`assignElement`/`removeElement`/`replaceElements`, `canvasElements`,
+`elementKeys`, `elementBounds`, `minimumTextSize`, `mouseCallback`, `canvasMouseEvents`,
+`rotateElement`, `imageFromCanvas`, `clickActivating`, `isShowing`/`isVisible`/`isOccluded` —
+keeps its v1 name. There's also a new `ignoreMouseEvents(flag)` for full click-through, which
+v1 had no direct equivalent for.
+
+**Indices are 0-based.** Every element index (`insertElement`, `removeElement`,
+`elementAttribute`, `rotateElement`, ...) counts from `0`, not `1`. An element without an
+`id` is reported to `mouseCallback` by its 0-based index, too.
+
+**No `c[i]` indexing sugar.** v1's metatable let you read and write elements as
+`c[2].fillColor = ...` or `c[#c + 1] = {...}`. JS has no equivalent, so use
+`setElementAttribute()`/`elementAttribute()`, `appendElements()`/`assignElement()`, and
+`elementCount()` in place of `#c`.
+
+**Window position uses unflipped coordinates.** v1 placed a canvas in Hammerspoon's flipped
+screen coordinates (`y = 0` at the *top* of the primary screen). v2's `create()`, `frame()`,
+and `topLeft()` use AppKit's unflipped coordinates (`y = 0` at the *bottom*, increasing
+upward), matching `hs.ui.window`. A canvas that should sit `y` points from the top of a
+screen with height `H` needs `y: H - y - h`. Element geometry *inside* the canvas (`frame`,
+`center`, `coordinates`) is unchanged — still top-down, relative to the canvas.
+
+**Colors are `{red, green, blue, alpha}` only.** v1's other color forms — `{hex = ...}`,
+`{white = ...}`, `{hue, saturation, brightness}`, and `{list, name}` — aren't accepted, and
+neither is the `HSColor` type that `hs.ui` uses. Any component you leave out defaults to `0`,
+except `alpha`, which defaults to `1`.
+
+**Element attributes that didn't make the trip.** These v1 keys are silently ignored, so a
+ported element may draw but look different:
+
+- Stroke styling beyond `strokeColor`/`strokeWidth`: `strokeDashPattern`, `strokeDashPhase`,
+  `strokeCapStyle`, `strokeJoinStyle`, `miterLimit`.
+- Shadows (`withShadow`, `shadow`), `antialias`, `flatness`/`flattenPath`, `padding`, and
+  `absolutePosition`/`absoluteSize`.
+- `trackMouseByBounds` — hit-testing always uses the element's actual shape.
+- Canvas-wide defaults (`c:canvasDefaults()`, `canvasDefaultFor()`, `canvasDefaultKeys()`):
+  set the attribute on each element instead.
+- `roundedRectRadii` is a single number (one radius for every corner), not v1's
+  `{xRadius, yRadius}` table.
+- `text` takes a plain string, not an `hs.styledtext` object. Style the whole element with
+  `textFont`/`textSize`/`textColor`/`textAlignment`/`textLineBreak`, plus v2's new
+  `textWeight`/`textDesign`/`textItalic`. Mixed styles need one `text` element per run.
+- `image` takes an `HSImage` (see [hs.image](#rebuilding-ui-with-hsui) above);
+  `imageAnimates`/`imageAnimationFrame` aren't supported.
+
+**Missing methods.** `orderAbove()`/`orderBelow()`/`sendToBack()`/`bringToFront()` (use
+`level()` to control stacking), `wantsLayer()`, getter forms of `level()`/`behavior()`, and
+the module-level helpers `hs.canvas.elementSpec()`, `hs.canvas.defaultTextStyle()`, and
+`hs.canvas.help()`.
+
+**`hs.canvas.matrix` is gone.** `setTransformation()` and `setElementTransformation()` take a
+plain `{m11, m12, m21, m22, tX, tY}` object rather than a matrix built with
+`hs.canvas.matrix.identity():translate(...):rotate(...)`. For the common cases, use
+`rotateElement()`/`rotateElementAroundPoint()`, or an element's `rotation`/`rotationPoint`
+attributes; for anything else, compute the six affine values yourself.
+
+**`draggingCallback` is simpler.** v1 called it with `(canvas, message, details)` for each of
+the `enter`/`exit`/`receive` stages. v2 only reports the drop itself, calling it with a single
+argument: an array of dropped file paths (or a one-element array holding dropped text).
 
 ## hs.spoons and Spoons
 
@@ -662,7 +790,8 @@ framework), `hs.distributednotifications` (no general-purpose observer for arbit
 distributed notifications — v2 uses `NSDistributedNotificationCenter` internally in a couple
 of places, but doesn't expose it to JS).
 
-**From the `hs.ui` rewrite specifically:** `hs.canvas.matrix` (2D transform math),
+**From the `hs.ui` rewrite specifically:** `hs.canvas.matrix` (the matrix-building helper —
+`hs.canvas` itself still accepts transforms as plain matrix objects, see [hs.canvas](#hscanvas)),
 `hs.webview.datastore` (per-webview cookie/storage isolation), and the system color-picker
 panel previously reachable via `hs.dialog.color` — see [Rebuilding UI with
 hs.ui](#rebuilding-ui-with-hsui) for details.
