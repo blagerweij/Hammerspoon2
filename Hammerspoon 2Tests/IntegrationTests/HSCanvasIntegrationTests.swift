@@ -98,6 +98,93 @@ struct HSCanvasTests {
             harness.expectEqual("hidingWorked", true)
         }
 
+        @Test("show() after destroy() throws, and doesn't bring the canvas back")
+        @MainActor
+        func showAfterDestroyThrows() {
+            let harness = makeHarness()
+            harness.eval("var c = hs.canvas.create({x: 0, y: 0, w: 50, h: 50}); c.show(); c.destroy()")
+            #expect(!harness.hasException)
+
+            harness.eval("c.show()")
+            #expect(harness.exceptionMessage?.contains("destroyed") == true)
+            #expect(harness.evalBool("c.isShowing()") == false)
+        }
+
+        @Test("Methods that would give a destroyed canvas elements or callbacks again throw",
+              arguments: [
+                  "appendElements([{ type: 'rectangle' }])",
+                  "insertElement({ type: 'rectangle' }, 0)",
+                  "assignElement({ type: 'rectangle' }, 0)",
+                  "replaceElements([{ type: 'rectangle' }])",
+                  "mouseCallback(() => {})",
+                  "draggingCallback(() => {})",
+                  "duplicate()",
+              ])
+        @MainActor
+        func methodsThrowAfterDestroy(call: String) {
+            let harness = makeHarness()
+            harness.eval("var c = hs.canvas.create({x: 0, y: 0, w: 50, h: 50}); c.destroy()")
+            #expect(!harness.hasException)
+
+            harness.eval("c.\(call)")
+            let method = String(call.prefix(while: { $0 != "(" }))
+            #expect(harness.exceptionMessage?.contains("\(method)() can't be called on a canvas that has been destroyed") == true)
+            #expect(harness.evalInt("c.elementCount()") == 0)
+        }
+
+        @Test("imageFromCanvas() returns null after destroy()")
+        @MainActor
+        func imageFromCanvasAfterDestroy() {
+            let harness = makeHarness()
+            harness.eval("""
+                var c = hs.canvas.create({x: 0, y: 0, w: 50, h: 50})
+                c.appendElements([{ type: "rectangle", action: "fill", fillColor: { red: 1 } }])
+                var before = c.imageFromCanvas()
+                c.destroy()
+                var after = c.imageFromCanvas()
+                """)
+            #expect(!harness.hasException)
+            #expect(harness.evalBool("before !== null && before !== undefined") == true, "A live canvas must render, for the test to mean anything")
+            // JSC bridges a nil return as undefined, so match either until nil returns are
+            // mapped to null everywhere.
+            #expect(harness.evalBool("after == null") == true)
+        }
+
+        @Test("hide() after destroy() does nothing")
+        @MainActor
+        func hideAfterDestroyIsHarmless() {
+            let harness = makeHarness()
+            harness.eval("var c = hs.canvas.create({x: 0, y: 0, w: 50, h: 50}); c.show(); c.destroy(); var r = c.hide()")
+            #expect(!harness.hasException)
+            #expect(harness.evalTypeOf("r") == "object")
+        }
+
+        @Test("destroy() releases the canvas's elements, and the images they hold, while the canvas is still referenced")
+        @MainActor
+        func destroyReleasesElements() {
+            let harness = makeHarness()
+            weak var image: HSImage?
+            autoreleasepool {
+                harness.eval("""
+                    var src = hs.canvas.create({x: 0, y: 0, w: 50, h: 50})
+                    src.appendElements([{ type: "rectangle", action: "fill", fillColor: { red: 1 } }])
+                    var img = src.imageFromCanvas()
+                    var c = hs.canvas.create({x: 0, y: 0, w: 50, h: 50})
+                    c.appendElements([{ type: "image", image: img }])
+                    c.show()
+                    void 0
+                """)
+                image = harness.evalValue("img")?.toObjectOf(HSImage.self) as? HSImage
+                harness.eval("img = null; src.destroy(); c.destroy(); void 0")
+            }
+            #expect(image != nil, "The image must have been made for the test to mean anything")
+            #expect(harness.evalInt("c.elementCount()") == 0)
+
+            harness.collectGarbage()
+            #expect(image == nil, "A destroyed canvas must not keep its elements' images alive")
+            #expect(!harness.hasException)
+        }
+
         @Test("levelValue() accepts a raw numeric level and chains")
         @MainActor
         func levelValueNumeric() {
@@ -751,6 +838,28 @@ struct HSCanvasTests {
             #expect(c?.isShowing() == true, "The canvas stays on screen while it fades")
             #expect(await harness.waitForAsync(timeout: 1.0) { c?.isShowing() == false })
             #expect(c?.windowAlphaValue == nil, "The window is released once the fade ends")
+        }
+
+        @Test("show() during a destroy(t) fade throws, and the canvas is still destroyed when the fade ends")
+        func showDuringDestroyFadeThrows() async {
+            let harness = makeHarness()
+            harness.eval("var c = hs.canvas.create({x: 0, y: 0, w: 50, h: 50}).show(); c.destroy(0.1)")
+            let c = canvas(harness)
+
+            harness.eval("c.show()")
+            #expect(harness.exceptionMessage?.contains("destroyed") == true)
+            #expect(await harness.waitForAsync(timeout: 1.0) { c?.windowAlphaValue == nil })
+            #expect(c?.isShowing() == false)
+        }
+
+        @Test("hide() during a destroy(t) fade doesn't stop the canvas being destroyed")
+        func hideDuringDestroyFade() async {
+            let harness = makeHarness()
+            harness.eval("var c = hs.canvas.create({x: 0, y: 0, w: 50, h: 50}).show(); c.destroy(0.1); c.hide()")
+            let c = canvas(harness)
+            #expect(!harness.hasException)
+            #expect(c?.isShowing() == true, "hide() must not cut the destroy fade short")
+            #expect(await harness.waitForAsync(timeout: 1.0) { c?.windowAlphaValue == nil })
         }
 
         @Test("A canvas fading out that nobody references stays alive until the fade ends, then is collected")

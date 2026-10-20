@@ -34,10 +34,12 @@ import SwiftUI
     ///
     /// A fade goes from fully transparent up to the canvas's `alpha()`. Calling `show()`,
     /// `hide()` or `destroy()` while a fade is running replaces that fade, so showing a
-    /// canvas that is fading out brings it back.
+    /// canvas that is fading out of `hide()` brings it back. A canvas that has been
+    /// destroyed can't be shown again, even while it is still fading out.
     /// - Note: A shown canvas stays on screen, with its callbacks, until it's hidden or destroyed, even if you don't keep a reference to it
     /// - Parameter fadeInTime?: The number of seconds to fade the canvas in over. Defaults to `0`, which shows it immediately
     /// - Returns: Self for chaining
+    /// - Throws: true
     /// - Example:
     /// ```js
     /// c.show(0.3)
@@ -48,7 +50,7 @@ import SwiftUI
     ///
     /// The canvas keeps its callbacks, and `isShowing()` stays `true`, until a fade-out
     /// has finished. Afterwards its `alpha()` is unchanged, so the next `show()` brings it
-    /// back at the same opacity.
+    /// back at the same opacity. Hiding a canvas that has been destroyed does nothing.
     /// - Parameter fadeOutTime?: The number of seconds to fade the canvas out over. Defaults to `0`, which hides it immediately
     /// - Returns: Self for chaining
     /// - Example:
@@ -58,6 +60,13 @@ import SwiftUI
     @objc(hide:) func hide(_ fadeOutTime: Double) -> HSCanvas
 
     /// Destroy the canvas window and release its resources, optionally fading it out first
+    ///
+    /// This releases the canvas's window, callbacks and elements (including any images
+    /// they hold) straight away, rather than when the canvas is garbage collected. A
+    /// destroyed canvas is finished with: from the moment `destroy()` is called, calling
+    /// `show()`, `appendElements()`, `insertElement()`, `assignElement()`,
+    /// `replaceElements()`, `mouseCallback()`, `draggingCallback()` or `duplicate()` on it
+    /// throws an error, and `imageFromCanvas()` returns `null`.
     ///
     /// Named `destroy()` rather than v1's `delete()` -- `delete` cannot be used as a
     /// JavaScriptCore-exported method name in this codebase's bridging layer.
@@ -210,6 +219,7 @@ import SwiftUI
     /// for the full explanation.
     /// - Parameter elements: {object[]} Array of element dictionaries (each needs at least a `type`)
     /// - Returns: Self for chaining
+    /// - Throws: true
     /// - Example:
     /// ```js
     /// c.appendElements([{ type: "circle", action: "fill", fillColor: { alpha: 1 } }])
@@ -221,6 +231,7 @@ import SwiftUI
     ///   - element: The element dictionary to insert
     ///   - index: The index to insert at (clamped to the valid range)
     /// - Returns: Self for chaining
+    /// - Throws: true
     @objc func insertElement(_ element: [String: Any], _ index: Int) -> HSCanvas
 
     /// Replace the element at an index, or append if the index equals the current element count
@@ -228,6 +239,7 @@ import SwiftUI
     ///   - element: The replacement element dictionary
     ///   - index: The index to replace
     /// - Returns: Self for chaining
+    /// - Throws: true
     @objc func assignElement(_ element: [String: Any], _ index: Int) -> HSCanvas
 
     /// Remove the element at a specific index
@@ -242,6 +254,7 @@ import SwiftUI
     /// Replace all elements on the canvas
     /// - Parameter elements: {object[]} The new full element list
     /// - Returns: Self for chaining
+    /// - Throws: true
     @objc func replaceElements(_ elements: [[String: Any]]) -> HSCanvas
 
     /// The number of elements on the canvas
@@ -319,6 +332,7 @@ import SwiftUI
     /// separately as `rightMouseDown`/`rightMouseUp`.
     /// - Parameter callback: {(canvas: HSCanvas, message: string, id: any, x: number, y: number) => void} A JavaScript function called with the canvas, the event name (`"mouseDown"`/`"mouseUp"`/`"rightMouseDown"`/`"rightMouseUp"`/`"mouseEnter"`/`"mouseExit"`/`"mouseMove"`), the tracked element's id, and the event's x/y coordinates
     /// - Returns: Self for chaining
+    /// - Throws: true
     /// - Example:
     /// ```js
     /// c.appendElements([{ type: "circle", action: "fill", trackMouseDown: true, id: "dot" }])
@@ -388,7 +402,7 @@ import SwiftUI
     // MARK: Export and duplication
 
     /// Render the canvas's current contents to an image
-    /// - Returns: An HSImage snapshot of the canvas, or `null` if it could not be rendered
+    /// - Returns: An HSImage snapshot of the canvas, or `null` if it could not be rendered or the canvas has been destroyed
     @objc func imageFromCanvas() -> HSImage?
 
     /// Create an independent copy of this canvas, with the same frame, elements, and
@@ -398,6 +412,7 @@ import SwiftUI
     /// forbid method names starting with `copy` (an ARC/ObjC hazard), the same rule
     /// that renamed `new()` to `create()`.
     /// - Returns: A new HSCanvas
+    /// - Throws: true
     @objc func duplicate() -> HSCanvas
 
     // MARK: Accessibility
@@ -412,6 +427,7 @@ import SwiftUI
     /// Set a callback fired when files or text are dropped onto the canvas
     /// - Parameter callback: {(paths: string[]) => void} Called with the dropped file paths, or a single-element array containing dropped text
     /// - Returns: Self for chaining
+    /// - Throws: true
     @objc func draggingCallback(_ callback: JSFunction) -> HSCanvas
 }
 
@@ -451,6 +467,11 @@ import SwiftUI
 
     // Whether a hide()/destroy() fade is running, so setAlpha() doesn't interrupt it.
     private var isFadingOut = false
+
+    // Set as soon as destroy() is called, before any fade-out, so the canvas can't be
+    // shown or take on elements or callbacks again (see rejectIfDestroyed()), or be
+    // hidden, which would cancel the fade and leave it undestroyed.
+    private var isDestroyed = false
 
     // Bumped by every show()/hide()/destroy(), so a fade's completion handler can tell
     // that a later call has replaced it and must do nothing.
@@ -502,6 +523,7 @@ import SwiftUI
     // MARK: - Lifecycle
 
     @objc(show:) func show(_ fadeInTime: Double) -> HSCanvas {
+        if rejectIfDestroyed("show") { return self }
         if nsWindow == nil {
             let content = HSCanvasRenderView(store: elementStore) { [weak self] message, id, x, y in
                 guard let self else { return }
@@ -554,6 +576,7 @@ import SwiftUI
     }
 
     @objc(hide:) func hide(_ fadeOutTime: Double) -> HSCanvas {
+        guard !isDestroyed else { return self }
         fadeOut(over: Self.fadeDuration(fadeOutTime)) { [weak self] in
             guard let self else { return }
             self.nsWindow?.orderOut(nil)
@@ -564,12 +587,14 @@ import SwiftUI
     }
 
     @objc(destroy:) func destroy(_ fadeOutTime: Double) {
+        isDestroyed = true
         fadeOut(over: Self.fadeDuration(fadeOutTime)) { [weak self] in
             self?.destroy()
         }
     }
 
     func destroy() {
+        isDestroyed = true
         fadeGeneration += 1
         isFadingOut = false
         mouseCallbackRef?.detach(from: self)
@@ -578,10 +603,26 @@ import SwiftUI
         draggingCallbackRef = nil
         isShown = false
 
+        // The elements can hold large native buffers (images) that JavaScriptCore doesn't
+        // know about, so it may not collect this canvas for a long time. Release them now.
+        elementStore.elements = []
+        elementStore.canvasTransform = nil
+
         guard let window = nsWindow else { return }
         window.contentView = nil
         window.close()
         nsWindow = nil
+    }
+
+    /// Throws a JS error for a call to `method` if the canvas has been destroyed, so a
+    /// destroyed canvas can't be shown or take on elements and callbacks again.
+    /// - Returns: `true` if the canvas has been destroyed, and the caller must do nothing
+    private func rejectIfDestroyed(_ method: String) -> Bool {
+        guard isDestroyed else { return false }
+        if let ctx = JSContext.current() {
+            ctx.exception = JSValue(newErrorFromMessage: "hs.canvas: \(method)() can't be called on a canvas that has been destroyed", in: ctx)
+        }
+        return true
     }
 
     @objc func alpha() -> Double {
@@ -788,17 +829,20 @@ import SwiftUI
     // MARK: - Element management
 
     @objc func appendElements(_ elements: [[String: Any]]) -> HSCanvas {
+        if rejectIfDestroyed("appendElements") { return self }
         elementStore.elements.append(contentsOf: elements)
         return self
     }
 
     @objc func insertElement(_ element: [String: Any], _ index: Int) -> HSCanvas {
+        if rejectIfDestroyed("insertElement") { return self }
         let clamped = max(0, min(index, elementStore.elements.count))
         elementStore.elements.insert(element, at: clamped)
         return self
     }
 
     @objc func assignElement(_ element: [String: Any], _ index: Int) -> HSCanvas {
+        if rejectIfDestroyed("assignElement") { return self }
         if index >= 0 && index < elementStore.elements.count {
             elementStore.elements[index] = element
         } else if index == elementStore.elements.count {
@@ -825,6 +869,7 @@ import SwiftUI
     }
 
     @objc func replaceElements(_ elements: [[String: Any]]) -> HSCanvas {
+        if rejectIfDestroyed("replaceElements") { return self }
         elementStore.elements = elements
         return self
     }
@@ -889,6 +934,7 @@ import SwiftUI
     // MARK: - Mouse interaction
 
     @objc func mouseCallback(_ callback: JSFunction) -> HSCanvas {
+        if rejectIfDestroyed("mouseCallback") { return self }
         mouseCallbackRef?.detach(from: self)
         mouseCallbackRef = JSCallback(value: callback, owner: self)
         return self
@@ -948,6 +994,7 @@ import SwiftUI
     // MARK: - Export and duplication
 
     @objc func imageFromCanvas() -> HSImage? {
+        guard !isDestroyed else { return nil }
         let containerSize = nsWindow?.frame.size ?? canvasFrame.size
         guard containerSize.width > 0, containerSize.height > 0 else { return nil }
 
@@ -964,6 +1011,7 @@ import SwiftUI
     }
 
     @objc func duplicate() -> HSCanvas {
+        if rejectIfDestroyed("duplicate") { return self }
         guard let module else {
             AKError("hs.canvas: duplicate() failed, module reference is gone")
             return self
@@ -991,6 +1039,7 @@ import SwiftUI
     // MARK: - Drag and drop
 
     @objc func draggingCallback(_ callback: JSFunction) -> HSCanvas {
+        if rejectIfDestroyed("draggingCallback") { return self }
         draggingCallbackRef?.detach(from: self)
         draggingCallbackRef = JSCallback(value: callback, owner: self)
         return self
