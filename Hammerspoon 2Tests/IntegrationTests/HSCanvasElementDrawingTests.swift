@@ -132,6 +132,8 @@ struct HSCanvasElementDrawingTests {
     func roundedRectRadiiSquare() throws {
         #expect(try roundedRectPath(nil).contains(CGPoint(x: 1, y: 1)))
         #expect(try roundedRectPath("20").contains(CGPoint(x: 1, y: 1)))
+        #expect(try roundedRectPath(["xRadius": 20, "yRadius": 20, "typo": 1]).contains(CGPoint(x: 1, y: 1)))
+        #expect(try roundedRectPath(["xRadius": "20", "yRadius": 20]).contains(CGPoint(x: 1, y: 1)))
     }
 
     @Test("cornerRadiiProblem accepts numbers and {xRadius, yRadius}, and reports anything else")

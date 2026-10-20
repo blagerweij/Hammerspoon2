@@ -482,12 +482,13 @@ enum CanvasElementDrawing {
 
     /// Parses `roundedRectRadii`: a number for circular corners, or v1's `{xRadius, yRadius}`
     /// for elliptical ones (a missing radius is 0). Returns `nil`, for square corners, if
-    /// `raw` is neither.
+    /// `raw` is neither, or is an object `cornerRadiiProblem(_:)` reports.
     static func cornerSize(_ raw: Any?) -> CGSize? {
         if let radius = raw as? NSNumber {
             return CGSize(width: radius.doubleValue, height: radius.doubleValue)
         }
-        guard let dict = raw as? [String: Any] else { return nil }
+        // An object with a problem stays square too, so what's drawn matches the warning
+        guard let dict = raw as? [String: Any], cornerRadiiProblem(dict) == nil else { return nil }
         let x = (dict["xRadius"] as? NSNumber)?.doubleValue ?? 0
         let y = (dict["yRadius"] as? NSNumber)?.doubleValue ?? 0
         return CGSize(width: x, height: y)
