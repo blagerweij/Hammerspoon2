@@ -30,10 +30,13 @@ import JavaScriptCore
 ///
 /// Available events: `"dOut"` (default output changed), `"dIn"` (default input changed),
 /// `"dSErr"` (default alert sound device changed), `"dev+"` (a device was added), `"dev-"`
-/// (a device was removed).
+/// (a device was removed). `"dOut"`, `"dIn"` and `"dSErr"` listeners receive the new default
+/// device (or `null` if there is none), `"dev+"` listeners the added device, and `"dev-"`
+/// listeners an `{id, uid, name}` object describing the removed device, which can no longer
+/// be used.
 ///
 /// ```javascript
-/// var fn = function() { console.log("Default output changed") };
+/// var fn = function(device) { console.log("Default output is now " + device.name) };
 /// hs.audiodevice.on("dOut", fn);
 /// // later…
 /// hs.audiodevice.off("dOut", fn);
@@ -229,7 +232,9 @@ nonisolated enum HSAudioDeviceEvent: String, HSEventName {
     @objc var once: JSFunction? = nil
     private var moduleCallback: JSCallback?
     private var moduleRegistrations: [String: (address: AudioObjectPropertyAddress, block: AudioObjectPropertyListenerBlock)] = unsafe [:]
-    private var previousDeviceIDs: Set<AudioObjectID> = []
+    /// The devices present when the device list last changed, with their identity, so a
+    /// `dev-` listener can be told which device went away after it can no longer be asked
+    private var previousDevices: [AudioObjectID: [String: Any]] = [:]
 
     @objc(_addWatcher:) func _addWatcher(_ listener: JSFunction) -> Bool {
         guard unsafe moduleRegistrations.isEmpty else {
@@ -247,22 +252,35 @@ nonisolated enum HSAudioDeviceEvent: String, HSEventName {
         for (event, selector) in propertyEvents {
             let eventName = event.rawValue
             var a = AudioObjectPropertyAddress(mSelector: selector, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
+            // Delivered on .main (see AudioObjectAddPropertyListenerBlock below)
             let block: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
-                _ = self?.moduleCallback?.call(withArguments: [eventName])
+                MainActor.assumeIsolated {
+                    guard let self else { return }
+                    // The new default device, read when the event is delivered
+                    let device: Any = self.deviceForProperty(selector) ?? NSNull()
+                    _ = self.moduleCallback?.call(withArguments: [eventName, device])
+                }
             }
             if unsafe AudioObjectAddPropertyListenerBlock(sysObjID, &a, .main, block) == noErr {
                 unsafe moduleRegistrations[eventName] = (address: a, block: block)
             }
         }
 
-        previousDeviceIDs = Set(allDeviceIDs())
+        previousDevices = currentDevices()
         var devAddr = AudioObjectPropertyAddress(mSelector: kAudioHardwarePropertyDevices, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
         let devBlock: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
-            guard let self else { return }
-            let current = Set(self.allDeviceIDs())
-            for _ in current.subtracting(self.previousDeviceIDs) { _ = self.moduleCallback?.call(withArguments: [HSAudioDeviceEvent.deviceAdded.rawValue]) }
-            for _ in self.previousDeviceIDs.subtracting(current) { _ = self.moduleCallback?.call(withArguments: [HSAudioDeviceEvent.deviceRemoved.rawValue]) }
-            self.previousDeviceIDs = current
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                let current = self.currentDevices()
+                let previous = self.previousDevices
+                self.previousDevices = current
+                for id in current.keys where previous[id] == nil {
+                    _ = self.moduleCallback?.call(withArguments: [HSAudioDeviceEvent.deviceAdded.rawValue, self.vend(id)])
+                }
+                for (id, identity) in previous where current[id] == nil {
+                    _ = self.moduleCallback?.call(withArguments: [HSAudioDeviceEvent.deviceRemoved.rawValue, identity])
+                }
+            }
         }
         if unsafe AudioObjectAddPropertyListenerBlock(sysObjID, &devAddr, .main, devBlock) == noErr {
             unsafe moduleRegistrations["__devices"] = (address: devAddr, block: devBlock)
@@ -291,6 +309,16 @@ nonisolated enum HSAudioDeviceEvent: String, HSEventName {
     }
 
     // MARK: - Private helpers
+
+    /// Every device present now, keyed by ID, with the `{id, uid, name}` a `dev-` listener receives
+    private func currentDevices() -> [AudioObjectID: [String: Any]] {
+        var devices: [AudioObjectID: [String: Any]] = [:]
+        for id in allDeviceIDs() {
+            let device = HSAudioDeviceManager.shared.device(for: id)
+            devices[id] = ["id": device.id, "uid": device.uid, "name": device.name]
+        }
+        return devices
+    }
 
     private func allDeviceIDs() -> [AudioObjectID] {
         let sysObjID = AudioObjectID(kAudioObjectSystemObject)

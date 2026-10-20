@@ -9,8 +9,8 @@
 // stops it once the last listener (across all events) is removed. See Engine/engine.js for
 // LazyWatcherEmitter itself.
 hs.audiodevice._watcherEmitter = new LazyWatcherEmitter("hs.audiodevice", function() {
-    return hs.audiodevice._addWatcher((event) => {
-        hs.audiodevice._watcherEmitter.emit(event);
+    return hs.audiodevice._addWatcher((event, ...args) => {
+        hs.audiodevice._watcherEmitter.emit(event, ...args);
     });
 }, function() {
     hs.audiodevice._removeWatcher();
@@ -19,13 +19,14 @@ hs.audiodevice._watcherEmitter = new LazyWatcherEmitter("hs.audiodevice", functi
 /// Register a listener for a named system-level audio configuration event.
 /// Parameters:
 ///  - event: {"dOut" | "dIn" | "dSErr" | "dev+" | "dev-"} The event to listen for
-///  - listener: {() => void} Called when the event occurs
+///  - listener: {(device: HSAudioDevice | {id: number, uid: string, name: string} | null) => void} Called when the event occurs. For `"dOut"`, `"dIn"` and `"dSErr"` it is passed the new default device (or `null` if there is none), for `"dev+"` the device that was added, and for `"dev-"` an `{id, uid, name}` object describing the device that was removed (it can no longer be used)
 /// Throws: true
 /// Example:
 /// ```js
 /// try {
-///     hs.audiodevice.on('dOut', () => console.log("Default output changed"))
-///     hs.audiodevice.on('dev+', () => console.log("A device was added"))
+///     hs.audiodevice.on('dOut', (device) => console.log("Default output is now " + device.name))
+///     hs.audiodevice.on('dev+', (device) => console.log("Added " + device.name))
+///     hs.audiodevice.on('dev-', (removed) => console.log("Removed " + removed.name))
 /// } catch (err) {
 ///     console.error(err.message)
 /// }
@@ -37,7 +38,7 @@ hs.audiodevice.on = function(event, listener) {
 /// Remove a previously registered system-level audio event listener.
 /// Parameters:
 ///  - event: {"dOut" | "dIn" | "dSErr" | "dev+" | "dev-"} The event the listener was registered for
-///  - listener: {() => void} The function originally passed to `on`
+///  - listener: {(device: HSAudioDevice | {id: number, uid: string, name: string} | null) => void} The function originally passed to `on`
 /// Example:
 /// ```js
 /// const onDefaultOutChange = () => console.log("changed")
@@ -52,12 +53,12 @@ hs.audiodevice.off = function(event, listener) {
 /// Register a listener that fires at most once for a system-level audio configuration event.
 /// Parameters:
 ///  - event: {"dOut" | "dIn" | "dSErr" | "dev+" | "dev-"} The event to listen for
-///  - listener: {() => void} Called the next time a matching event occurs, then automatically removed
+///  - listener: {(device: HSAudioDevice | {id: number, uid: string, name: string} | null) => void} Called the next time a matching event occurs, then automatically removed. Passed the same value as for `on()`
 /// Throws: true
 /// Example:
 /// ```js
 /// try {
-///     hs.audiodevice.once('dev+', () => console.log("First device-added event seen"))
+///     hs.audiodevice.once('dev+', (device) => console.log("First device added: " + device.name))
 /// } catch (err) {
 ///     console.error(err.message)
 /// }

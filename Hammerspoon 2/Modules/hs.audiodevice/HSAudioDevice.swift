@@ -192,7 +192,7 @@ private func caDataSourceName(_ objectID: AudioObjectID,
 /// ```javascript
 /// const dev = hs.audiodevice.defaultOutputDevice();
 /// if (dev) {
-///     var fn = function() { console.log("Output volume changed"); };
+///     var fn = function(volume) { console.log("Output volume changed to " + volume); };
 ///     dev.on('vmout', fn);
 ///     // later…
 ///     dev.off('vmout', fn);
@@ -297,7 +297,8 @@ private func caDataSourceName(_ objectID: AudioObjectID,
     // MARK: Output volume & mute
 
     /// Output volume scalar in the range `0.0`–`1.0`, or `null` if the device has
-    /// no controllable output volume. Setting `null` is a no-op.
+    /// no controllable output volume. Setting `null` is a no-op, and setting a value outside
+    /// `0.0`–`1.0` logs an error and leaves the volume unchanged (Hammerspoon v1 used `0`–`100`).
     /// - Example:
     /// ```js
     /// const dev = hs.audiodevice.defaultOutputDevice()
@@ -314,7 +315,8 @@ private func caDataSourceName(_ objectID: AudioObjectID,
     @objc var muted: Bool { get set }
 
     /// Output stereo balance in the range `0.0` (full left)–`1.0` (full right),
-    /// or `null` if balance control is not available.
+    /// or `null` if balance control is not available. Setting a value outside `0.0`–`1.0`
+    /// logs an error and leaves the balance unchanged.
     /// - Example:
     /// ```js
     /// const dev = hs.audiodevice.defaultOutputDevice()
@@ -325,7 +327,8 @@ private func caDataSourceName(_ objectID: AudioObjectID,
     // MARK: Input volume & mute
 
     /// Input (microphone) volume scalar in the range `0.0`–`1.0`, or `null` if
-    /// the device has no controllable input volume.
+    /// the device has no controllable input volume. Setting a value outside `0.0`–`1.0` logs
+    /// an error and leaves the volume unchanged (Hammerspoon v1 used `0`–`100`).
     /// - Example:
     /// ```js
     /// const mic = hs.audiodevice.defaultInputDevice()
@@ -454,30 +457,35 @@ private func caDataSourceName(_ objectID: AudioObjectID,
     /// Register a listener for a named per-device property-change event.
     ///
     /// Available events:
-    /// - `"vmout"` — output volume changed
-    /// - `"vmin"` — input volume changed
-    /// - `"mout"` — output mute state changed
-    /// - `"min"` — input mute state changed
-    /// - `"rate"` — sample rate changed
-    /// - `"dsout"` — output data source changed
-    /// - `"dsin"` — input data source changed
-    /// - `"balance"` — output stereo balance changed
+    /// - `"vmout"` — output volume changed. The listener receives the new ``volume``.
+    /// - `"vmin"` — input volume changed. The listener receives the new ``inputVolume``.
+    /// - `"mout"` — output mute state changed. The listener receives the new ``muted`` value.
+    /// - `"min"` — input mute state changed. The listener receives the new ``inputMuted`` value.
+    /// - `"rate"` — sample rate changed. The listener receives the new ``sampleRate``.
+    /// - `"dsout"` — output data source changed. The listener receives the new
+    ///   ``currentOutputDataSource()``.
+    /// - `"dsin"` — input data source changed. The listener receives the new
+    ///   ``currentInputDataSource()``.
+    /// - `"balance"` — output stereo balance changed. The listener receives the new ``balance``.
     /// - `"inUse"` — the device started or stopped being used by any process. The listener
     ///   receives the new ``isInUse`` value.
     /// - `"jack"` — a jack (e.g. headphones) was connected or disconnected. The listener
     ///   receives the new ``jackConnected`` value.
     /// - `"config"` — the device's configuration changed (e.g. its streams or channel layout);
-    ///   any properties you have cached for it may be stale
+    ///   any properties you have cached for it may be stale. The listener receives nothing.
+    ///
+    /// The value is read when the listener is called, and is `null` if the device can't
+    /// report it (as the property itself would be).
     ///
     /// - Parameters:
     ///   - event: {"vmout" | "vmin" | "mout" | "min" | "rate" | "dsout" | "dsin" | "balance" | "inUse" | "jack" | "config"} The event to listen for
-    ///   - listener: {(state?: boolean) => void} Called when the event occurs. For `"inUse"` and `"jack"` it is passed the device's new state; for all other events it is passed nothing
+    ///   - listener: {(value?: number | boolean | {id: number, name: string} | null) => void} Called when the event occurs, with the new value of the property that changed (see above); for `"config"` it is passed nothing
     /// - Throws: true
     /// - Example:
     /// ```js
     /// const dev = hs.audiodevice.defaultOutputDevice()
     /// try {
-    ///     dev.on('vmout', () => console.log("Output volume changed"))
+    ///     dev.on('vmout', (volume) => console.log("Output volume is now " + volume))
     ///
     ///     // Be told whenever any app opens or releases the microphone
     ///     const mic = hs.audiodevice.defaultInputDevice()
@@ -501,7 +509,7 @@ private func caDataSourceName(_ objectID: AudioObjectID,
     /// Register a listener that fires at most once for a per-device event.
     /// - Parameters:
     ///   - event: {"vmout" | "vmin" | "mout" | "min" | "rate" | "dsout" | "dsin" | "balance" | "inUse" | "jack" | "config"} The event to listen for
-    ///   - listener: {(state?: boolean) => void} Called once, then automatically removed. Passed the new state for `"inUse"` and `"jack"`, as for `on()`
+    ///   - listener: {(value?: number | boolean | {id: number, name: string} | null) => void} Called once, then automatically removed. Passed the new value, as for `on()`
     /// - Throws: true
     /// - Example:
     /// ```js
@@ -641,6 +649,19 @@ nonisolated enum HSAudioDevicePropertyEvent: String, HSEventName {
 
     // MARK: - Output volume & mute
 
+    /// Whether `value` is in the `0.0`–`1.0` range CoreAudio's volume and balance scalars use,
+    /// logging an error if not. Out-of-range values are refused rather than clamped: a v1
+    /// script setting `volume = 50` meant half volume, and clamping it would mean full volume.
+    private func isUnitScalar(_ value: NSNumber, _ property: String) -> Bool {
+        let scalar = value.doubleValue
+        guard scalar >= 0 && scalar <= 1 else {
+            let hint = property == "balance" || scalar > 100 ? "" : " (Hammerspoon v1 used 0-100, so use \(scalar / 100) for \(scalar)%)"
+            AKError("hs.audiodevice: \(property) must be between 0.0 and 1.0, not \(scalar)\(hint). Leaving it unchanged.")
+            return false
+        }
+        return true
+    }
+
     @objc var volume: NSNumber? {
         get {
             let element = volumeElement(scope: kAudioDevicePropertyScopeOutput)
@@ -649,7 +670,7 @@ nonisolated enum HSAudioDevicePropertyEvent: String, HSEventName {
             return NSNumber(value: Double(v))
         }
         set {
-            guard let newValue else { return }
+            guard let newValue, isUnitScalar(newValue, "volume") else { return }
             let element = volumeElement(scope: kAudioDevicePropertyScopeOutput)
             caSetFloat32(objectID, kAudioDevicePropertyVolumeScalar,
                          kAudioDevicePropertyScopeOutput, element,
@@ -669,7 +690,7 @@ nonisolated enum HSAudioDevicePropertyEvent: String, HSEventName {
             return NSNumber(value: Double(v))
         }
         set {
-            guard let newValue else { return }
+            guard let newValue, isUnitScalar(newValue, "balance") else { return }
             caSetFloat32(objectID, kAudioDevicePropertyStereoPan, kAudioDevicePropertyScopeOutput,
                          value: Float32(newValue.doubleValue))
         }
@@ -685,7 +706,7 @@ nonisolated enum HSAudioDevicePropertyEvent: String, HSEventName {
             return NSNumber(value: Double(v))
         }
         set {
-            guard let newValue else { return }
+            guard let newValue, isUnitScalar(newValue, "inputVolume") else { return }
             let element = volumeElement(scope: kAudioDevicePropertyScopeInput)
             caSetFloat32(objectID, kAudioDevicePropertyVolumeScalar,
                          kAudioDevicePropertyScopeInput, element,
@@ -912,14 +933,25 @@ nonisolated enum HSAudioDevicePropertyEvent: String, HSEventName {
         return true
     }
 
-    /// Extra arguments passed to listeners after the event name: the new state, for the events
-    /// that report one. Read when the event is delivered, not when CoreAudio queued it.
+    /// Extra arguments passed to listeners after the event name: the new value, for the events
+    /// that report one. Read when the event is delivered, not when CoreAudio queued it. A value
+    /// the device can't report arrives as `null`.
     private func eventArguments(_ event: HSAudioDevicePropertyEvent) -> [Any] {
+        let value: Any?
         switch event {
-        case .inUse: return [isInUse]
-        case .jack: return [jackConnected]
-        default: return []
+        case .outputVolume: value = volume
+        case .inputVolume: value = inputVolume
+        case .outputMute: value = muted
+        case .inputMute: value = inputMuted
+        case .sampleRate: value = sampleRate
+        case .outputDataSource: value = currentOutputDataSource()
+        case .inputDataSource: value = currentInputDataSource()
+        case .balance: value = balance
+        case .inUse: value = isInUse
+        case .jack: value = jackConnected
+        case .configuration: return []
         }
+        return [value ?? NSNull()]
     }
 
     @objc(_removeWatcher) func _removeWatcher() {

@@ -273,6 +273,29 @@ struct HSAudioDeviceTests {
         """)
         }
 
+        @Test("volume, inputVolume and balance refuse values outside 0.0-1.0 and stay unchanged")
+        func testScalarsRefuseOutOfRangeValues() {
+            let harness = makeHarness()
+            // Refused values never reach CoreAudio, so this changes nothing on any device
+            harness.eval("""
+            var _rangeResults = [];
+            hs.audiodevice.all().forEach(function(d) {
+                ['volume', 'inputVolume', 'balance'].forEach(function(prop) {
+                    var before = d[prop];
+                    if (before === null) return;
+                    [50, 100, 1.01, -0.1, NaN].forEach(function(bad) {
+                        d[prop] = bad;
+                        _rangeResults.push({ prop: prop, bad: bad, unchanged: d[prop] === before });
+                    });
+                });
+            });
+            var _rangeFailures = _rangeResults.filter(function(r) { return !r.unchanged; })
+                .map(function(r) { return r.prop + "=" + r.bad; });
+        """)
+            #expect(!harness.hasException)
+            #expect(harness.evalValue("_rangeFailures")?.toArray() as? [String] == [])
+        }
+
         @Test("output device muted is a boolean")
         func testOutputMuted() {
             let harness = makeHarness()
@@ -543,7 +566,8 @@ struct HSAudioDeviceTests {
 
             harness.eval("""
             var _devWatchFired = false;
-            var _watchFn = function() { _devWatchFired = true; };
+            var _devWatchVolume = null;
+            var _watchFn = function(volume) { _devWatchFired = true; _devWatchVolume = volume; };
             var _volDev = hs.audiodevice.defaultOutputDevice();
             _volDev.on('vmout', _watchFn);
         """)
@@ -553,6 +577,9 @@ struct HSAudioDeviceTests {
             try await Task.sleep(for: .milliseconds(500))
 
             harness.expectTrue("_devWatchFired")
+            // The listener receives the new volume (CoreAudio may quantise it slightly)
+            let reported = try #require(harness.evalDouble("_devWatchVolume"))
+            #expect(abs(reported - nudged.doubleValue) < 0.02)
         }
 
         @Test("multiple device watcher listeners all fire on the same event")
@@ -659,7 +686,8 @@ struct HSAudioDeviceTests {
 
             harness.eval("""
             var _sysOutFired = false;
-            var _sysOutFn = function() { _sysOutFired = true; };
+            var _sysOutUID = null;
+            var _sysOutFn = function(device) { _sysOutFired = true; _sysOutUID = device ? device.uid : null; };
             hs.audiodevice.on('dOut', _sysOutFn);
         """)
             defer { harness.eval("hs.audiodevice.off('dOut', _sysOutFn);") }
@@ -668,6 +696,7 @@ struct HSAudioDeviceTests {
             try await Task.sleep(for: .milliseconds(500))
 
             harness.expectTrue("_sysOutFired")
+            #expect(harness.evalString("_sysOutUID") == altDevice.uid)
         }
 
         @Test("system watcher fires dIn event when default input device changes")
@@ -684,7 +713,8 @@ struct HSAudioDeviceTests {
 
             harness.eval("""
             var _sysInFired = false;
-            var _sysInFn = function() { _sysInFired = true; };
+            var _sysInUID = null;
+            var _sysInFn = function(device) { _sysInFired = true; _sysInUID = device ? device.uid : null; };
             hs.audiodevice.on('dIn', _sysInFn);
         """)
             defer { harness.eval("hs.audiodevice.off('dIn', _sysInFn);") }
@@ -693,6 +723,55 @@ struct HSAudioDeviceTests {
             try await Task.sleep(for: .milliseconds(500))
 
             harness.expectTrue("_sysInFired")
+            #expect(harness.evalString("_sysInUID") == altDevice.uid)
+        }
+
+        @Test("system watcher passes the added device to dev+ and its identity to dev-")
+        @MainActor
+        func testSystemWatcherDevicePayloads() async throws {
+            let harness = makeHarness()
+            harness.eval("""
+            var _added = [], _removed = [];
+            var _addFn = function(device) { _added.push({ uid: device.uid, name: device.name, isDevice: device.toString().indexOf('HSAudioDevice') !== -1 }); };
+            var _removeFn = function(info) { _removed.push(info); };
+            hs.audiodevice.on('dev+', _addFn);
+            hs.audiodevice.on('dev-', _removeFn);
+        """)
+            defer { harness.eval("hs.audiodevice.off('dev+', _addFn); hs.audiodevice.off('dev-', _removeFn);") }
+            #expect(!harness.hasException)
+
+            let uid = "net.tenshu.Hammerspoon-2.tests.aggregate.\(UUID().uuidString)"
+            let name = "Hammerspoon 2 test aggregate"
+            // A private aggregate with no sub-devices: it's only visible to this process and
+            // routes no audio, and it's destroyed below
+            let description: [String: Any] = [
+                kAudioAggregateDeviceUIDKey: uid,
+                kAudioAggregateDeviceNameKey: name,
+                kAudioAggregateDeviceIsPrivateKey: 1,
+            ]
+            var aggregateID = AudioObjectID(kAudioObjectUnknown)
+            guard unsafe AudioHardwareCreateAggregateDevice(description as CFDictionary, &aggregateID) == noErr else {
+                Issue.record("Couldn't create an aggregate device")
+                return
+            }
+            var destroyed = false
+            defer { if !destroyed { AudioHardwareDestroyAggregateDevice(aggregateID) } }
+
+            let added = await harness.waitForAsync(timeout: 3.0) {
+                harness.evalBool("_added.some(function(d) { return d.uid === '\(uid)'; })") == true
+            }
+            #expect(added)
+            harness.expectTrue("_added.filter(function(d) { return d.uid === '\(uid)'; })[0].isDevice")
+
+            AudioHardwareDestroyAggregateDevice(aggregateID)
+            destroyed = true
+            let removed = await harness.waitForAsync(timeout: 3.0) {
+                harness.evalBool("_removed.some(function(d) { return d.uid === '\(uid)'; })") == true
+            }
+            #expect(removed)
+            harness.eval("var _removedInfo = _removed.filter(function(d) { return d.uid === '\(uid)'; })[0];")
+            #expect(harness.evalString("_removedInfo.name") == name)
+            #expect(harness.evalInt("_removedInfo.id") == Int(aggregateID))
         }
 
         // MARK: - Default device setters (smoke tests only — no mutation)
