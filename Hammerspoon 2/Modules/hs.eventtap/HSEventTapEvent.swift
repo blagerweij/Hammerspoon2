@@ -105,13 +105,13 @@ import CoreGraphics
     @objc var characters: String? { get }
 
     /// For a system key event (media, volume, brightness and other special keys), an object
-    /// describing the key; for any other event, undefined.
+    /// describing the key; for any other event, null.
     ///
     /// The object has `key` (a name from `hs.eventtap.systemKeys`, or "unknown"), `keyCode`
     /// (the numeric system key code), `isDown` (true for key down, false for key up) and
     /// `isRepeat` (true if the key is auto-repeating). Watch for these events with
     /// `hs.eventtap.eventTypes.systemDefined`; other kinds of system-defined event, which don't
-    /// represent a key, also yield undefined.
+    /// represent a key, also yield null.
     /// - Example:
     /// ```js
     /// const tap = hs.eventtap.addWatcher([hs.eventtap.eventTypes.systemDefined], (event) => {

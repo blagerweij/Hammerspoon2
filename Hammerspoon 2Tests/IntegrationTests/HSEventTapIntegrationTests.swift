@@ -614,11 +614,11 @@ struct HSEventTapTests {
             #expect(!harness.hasException)
         }
 
-        @Test("systemKey is undefined for ordinary events")
-        func testSystemKeyUndefinedForOtherEvents() {
+        @Test("systemKey is null for ordinary events")
+        func testSystemKeyNullForOtherEvents() {
             let harness = makeHarness()
-            #expect(harness.evalTypeOf("hs.eventtap.makeKeyEvent('a', true).systemKey") == "undefined")
-            #expect(harness.evalTypeOf("hs.eventtap.makeScrollWheelEvent(0, 3, 500, 400).systemKey") == "undefined")
+            harness.expectTrue("hs.eventtap.makeKeyEvent('a', true).systemKey === null")
+            harness.expectTrue("hs.eventtap.makeScrollWheelEvent(0, 3, 500, 400).systemKey === null")
             #expect(!harness.hasException)
         }
 
@@ -675,12 +675,12 @@ struct HSEventTapTests {
             #expect(!harness.hasException)
         }
 
-        @Test("systemKey is undefined for systemDefined events of other subtypes")
-        func testSystemKeyUndefinedForOtherSubtypes() throws {
+        @Test("systemKey is null for systemDefined events of other subtypes")
+        func testSystemKeyNullForOtherSubtypes() throws {
             // Same data1 as a PLAY key down, but not the aux control buttons subtype (8)
             let harness = try makeHarness(systemDefinedSubtype: 7, data1: 0x0010_0A00)
             #expect(harness.evalInt("evt.type") == harness.evalInt("hs.eventtap.eventTypes.systemDefined"))
-            #expect(harness.evalTypeOf("evt.systemKey") == "undefined")
+            harness.expectTrue("evt.systemKey === null")
             #expect(!harness.hasException)
         }
 

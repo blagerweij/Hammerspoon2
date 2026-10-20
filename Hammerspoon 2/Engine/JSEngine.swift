@@ -62,6 +62,7 @@ class JSEngine {
         do {
             try context.install([
                 .fetch,
+                NullReturnsInstaller(),        // nil returned from Swift reaches JS as null
                 ConsoleModuleInstaller(),      // console namespace
                 NodeBuiltinModulesInstaller(), // native backing for require('util') etc.
                 RequireInstaller(),            // require() function
