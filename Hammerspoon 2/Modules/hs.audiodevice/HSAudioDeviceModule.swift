@@ -36,7 +36,7 @@ import JavaScriptCore
 /// be used.
 ///
 /// ```javascript
-/// var fn = function(device) { console.log("Default output is now " + device.name) };
+/// var fn = function(device) { console.log("Default output is now " + (device ? device.name : "none")) };
 /// hs.audiodevice.on("dOut", fn);
 /// // later…
 /// hs.audiodevice.off("dOut", fn);

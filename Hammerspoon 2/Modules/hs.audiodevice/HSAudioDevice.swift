@@ -475,7 +475,8 @@ private func caDataSourceName(_ objectID: AudioObjectID,
     ///   any properties you have cached for it may be stale. The listener receives nothing.
     ///
     /// The value is read when the listener is called, and is `null` if the device can't
-    /// report it (as the property itself would be).
+    /// report it. `"inUse"` and `"jack"` always pass a boolean, `false` if the device can't
+    /// report it, as ``isInUse`` and ``jackConnected`` do.
     ///
     /// - Parameters:
     ///   - event: {"vmout" | "vmin" | "mout" | "min" | "rate" | "dsout" | "dsin" | "balance" | "inUse" | "jack" | "config"} The event to listen for
@@ -655,7 +656,9 @@ nonisolated enum HSAudioDevicePropertyEvent: String, HSEventName {
     private func isUnitScalar(_ value: NSNumber, _ property: String) -> Bool {
         let scalar = value.doubleValue
         guard scalar >= 0 && scalar <= 1 else {
-            let hint = property == "balance" || scalar > 100 ? "" : " (Hammerspoon v1 used 0-100, so use \(scalar / 100) for \(scalar)%)"
+            // Only a value v1's 0-100 scale could have meant gets the conversion hint
+            let hint = property != "balance" && scalar.isFinite && scalar > 1 && scalar <= 100
+                ? " (Hammerspoon v1 used 0-100, so use \(scalar / 100) for \(scalar)%)" : ""
             AKError("hs.audiodevice: \(property) must be between 0.0 and 1.0, not \(scalar)\(hint). Leaving it unchanged.")
             return false
         }
@@ -941,8 +944,9 @@ nonisolated enum HSAudioDevicePropertyEvent: String, HSEventName {
         switch event {
         case .outputVolume: value = volume
         case .inputVolume: value = inputVolume
-        case .outputMute: value = muted
-        case .inputMute: value = inputMuted
+        // Read directly rather than through muted/inputMuted, which report a failed read as false
+        case .outputMute: value = caGetUInt32(objectID, kAudioDevicePropertyMute, kAudioDevicePropertyScopeOutput).map { $0 == 1 }
+        case .inputMute: value = caGetUInt32(objectID, kAudioDevicePropertyMute, kAudioDevicePropertyScopeInput).map { $0 == 1 }
         case .sampleRate: value = sampleRate
         case .outputDataSource: value = currentOutputDataSource()
         case .inputDataSource: value = currentInputDataSource()

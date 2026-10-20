@@ -24,7 +24,7 @@ hs.audiodevice._watcherEmitter = new LazyWatcherEmitter("hs.audiodevice", functi
 /// Example:
 /// ```js
 /// try {
-///     hs.audiodevice.on('dOut', (device) => console.log("Default output is now " + device.name))
+///     hs.audiodevice.on('dOut', (device) => console.log("Default output is now " + (device ? device.name : "none")))
 ///     hs.audiodevice.on('dev+', (device) => console.log("Added " + device.name))
 ///     hs.audiodevice.on('dev-', (removed) => console.log("Removed " + removed.name))
 /// } catch (err) {
