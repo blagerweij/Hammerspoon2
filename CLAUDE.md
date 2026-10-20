@@ -94,7 +94,7 @@ Use the `/HSTests` skill when writing or reviewing tests.
 
 - **Logging:** `AKDebug(...)`, `AKError(...)`, `AKWarning(...)` — never `print` in production code (the hash module's `deinit` is the exception to clean up).
 - **JS↔Swift on main thread:** JS runs on the main thread. Use `MainActor.assumeIsolated { }` when JS calls into `@MainActor`-isolated code.
-- **nil reaches JS as `null`:** JavaScriptCore bridges a nil object return as `undefined`, so `NullReturnsInstaller` (`Engine/NullReturnsInstaller.swift`) wraps every object-returning JSExport method and getter of app classes to return `null` instead. Just return a Swift optional; no need to build `JSValue(nullIn:)`. Members returning `JSValue` are not wrapped (their `undefined` may be deliberate), so those must return `JSValue(nullIn:)` themselves where they mean null.
+- **nil reaches JS as `null`:** JavaScriptCore bridges a nil object return as `undefined`, so `NullReturnsInstaller` (`Engine/NullReturnsInstaller.swift`) wraps every object-returning JSExport method and getter of app classes to return `null` instead. Just return a Swift optional; no need to build `JSValue(nullIn:)`. The rare member that passes through a deliberate JS `undefined` (e.g. `hs.fs.withFile`) must be listed in `NullReturnsInstaller.passthroughMembers`.
 - **`JSConvertible` protocol** — used for custom bridging of Swift types to/from `JSValue`.
 - **SourceKit false positives:** SourceKit frequently reports "cannot find type" errors across files; these are not real compile errors.
 - **Docstrings:** All public API protocol methods require `///` doc comments with a `- Parameter:`, `- Returns:`, and `- Example:` block (used by the docs pipeline).

@@ -115,9 +115,6 @@ struct NullReturnsTests {
         #expect(!NullReturnsInstaller.returnsObject("v24@0:8@16"))
         #expect(!NullReturnsInstaller.returnsObject("B16@0:8"))
         #expect(!NullReturnsInstaller.returnsObject(nil))
-        // A JSValue may be a deliberate undefined, so it's left alone
-        #expect(NullReturnsInstaller.returnsObject("@\"NSString\"24@0:8@\"NSString\"16"))
-        #expect(!NullReturnsInstaller.returnsObject("@\"JSValue\"24@0:8@\"NSString\"16"))
     }
 
     @Test("The installer finds the app's exported classes")
@@ -130,9 +127,28 @@ struct NullReturnsTests {
         // Scalar-returning and Void members aren't wrapped
         #expect(image?.instanceGetters.contains("template") == false)
         #expect(image?.instanceMethods.contains("set") == false)
-        // Nor are JSValue-returning members, whose undefined may be deliberate
+        // Nor are passthrough members, whose undefined is deliberate
         let fs = NullReturnsInstaller.exportedClasses.first { $0.name == NSStringFromClass(HSFSModule.self) }
-        #expect(fs?.instanceMethods.contains("read") == true)
+        #expect(fs?.instanceMethods.contains("open") == true)
         #expect(fs?.instanceMethods.contains("withFile") == false)
+    }
+
+    @Test("Every passthrough member is exported, so a rename can't silently drop it")
+    func testPassthroughMembersExist() {
+        for passthrough in NullReturnsInstaller.passthroughMembers {
+            let harness = JSTestHarness()
+            harness.context.setObject(passthrough.cls, forKeyedSubscript: "cls" as NSString)
+            #expect(harness.evalBool("'\(passthrough.member)' in cls.prototype") == true, "\(passthrough.cls).\(passthrough.member)")
+        }
+    }
+
+    @Test("A JSValue-returning method returning nil returns null")
+    func testNilJSValueMethodReturnIsNull() throws {
+        let harness = makeHarness()
+        harness.loadModule(HSFSModule.self, as: "fs")
+        let path = FileManager.default.temporaryDirectory.appendingPathComponent("NullReturnsTests-\(UUID().uuidString)").path
+        defer { try? FileManager.default.removeItem(atPath: path) }
+        harness.eval("var f = hs.fs.open('\(path)', 'w'); f.close()")
+        harness.expectTrue("f.readLine() === null")
     }
 }
