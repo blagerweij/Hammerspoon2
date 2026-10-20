@@ -10,6 +10,7 @@
 import Testing
 import CoreGraphics
 import SwiftUI
+import AppKit
 @testable import Hammerspoon_2
 
 @Suite("hs.canvas element drawing tests")
@@ -127,6 +128,114 @@ struct HSCanvasElementDrawingTests {
         ]
         let shading = CanvasElementDrawing.gradientShading(element, path: Path(CGRect(x: 0, y: 0, width: 10, height: 10)), containerSize: CGSize(width: 100, height: 100))
         #expect(shading == nil)
+    }
+
+    // MARK: - Colors
+
+    /// A color's sRGB components, for comparing against expected values
+    private func rgba(_ color: Color?) -> [Double]? {
+        guard let color, let srgb = NSColor(color).usingColorSpace(.sRGB) else { return nil }
+        return [srgb.redComponent, srgb.greenComponent, srgb.blueComponent, srgb.alphaComponent].map(Double.init)
+    }
+
+    private func expectColor(_ raw: Any, _ expected: [Double], sourceLocation: SourceLocation = #_sourceLocation) {
+        let actual = rgba(CanvasElementDrawing.parseColor(raw))
+        #expect(actual != nil, "\(raw) didn't parse", sourceLocation: sourceLocation)
+        guard let actual else { return }
+        let close = zip(actual, expected).allSatisfy { abs($0 - $1) < 0.002 }
+        #expect(close, "\(raw) parsed as \(actual), expected \(expected)", sourceLocation: sourceLocation)
+    }
+
+    @Test("parseColor reads {red, green, blue, alpha}, with missing components 0 and alpha 1")
+    func parseColorRGB() {
+        expectColor(["red": 1, "green": 0.5, "blue": 0.25, "alpha": 0.5], [1, 0.5, 0.25, 0.5])
+        expectColor(["alpha": 1], [0, 0, 0, 1])
+        expectColor([String: Any](), [0, 0, 0, 1])
+    }
+
+    @Test("parseColor reads {white, alpha}")
+    func parseColorWhite() {
+        expectColor(["white": 1], [1, 1, 1, 1])
+        expectColor(["white": 0.5, "alpha": 0.25], [0.5, 0.5, 0.5, 0.25])
+    }
+
+    @Test("parseColor reads {hue, saturation, brightness, alpha}")
+    func parseColorHSB() {
+        expectColor(["hue": 0, "saturation": 1, "brightness": 1], [1, 0, 0, 1])
+        expectColor(["hue": 1.0 / 3.0, "saturation": 1, "brightness": 0.5, "alpha": 0.5], [0, 0.5, 0, 0.5])
+    }
+
+    @Test("parseColor reads {hex, alpha} and hex strings in #RGB, #RRGGBB and #RRGGBBAA forms")
+    func parseColorHex() {
+        expectColor(["hex": "#FFF"], [1, 1, 1, 1])
+        expectColor(["hex": "#FF0000", "alpha": 0.5] as [String: Any], [1, 0, 0, 0.5])
+        expectColor("#00FF00", [0, 1, 0, 1])
+        expectColor("0000FF", [0, 0, 1, 1])
+        expectColor("#F00", [1, 0, 0, 1])
+        expectColor("#FF000080", [1, 0, 0, 128.0 / 255.0])
+    }
+
+    @Test("parseColor reads {list, name} from a system color list")
+    func parseColorList() throws {
+        let list = try #require(NSColorList.availableColorLists.first { !$0.allKeys.isEmpty })
+        let name = try #require(list.allKeys.first)
+        let listName = try #require(list.name)
+        #expect(CanvasElementDrawing.parseColor(["list": listName, "name": name]) != nil)
+        #expect(CanvasElementDrawing.colorProblem(["list": listName, "name": name]) == nil)
+    }
+
+    @Test("parseColor reads an HSColor")
+    func parseColorHSColor() {
+        expectColor(HSColor.hex("#0000FF"), [0, 0, 1, 1])
+    }
+
+    @Test("parseColor picks the form like v1: list/name, then hex, then white, then hue")
+    func parseColorFormPrecedence() {
+        expectColor(["hex": "#00FF00", "white": 1, "red": 1] as [String: Any], [0, 1, 0, 1])
+        expectColor(["white": 1, "hue": 0, "saturation": 1, "brightness": 1], [1, 1, 1, 1])
+        expectColor(["hue": 0, "saturation": 1, "brightness": 1, "blue": 1], [1, 0, 0, 1])
+    }
+
+    @Test("parseColor returns nil for values that aren't a usable color")
+    func parseColorInvalid() {
+        let values: [Any] = ["#GGG", "#12345", ["hex": "nope"], ["list": "No Such List", "name": "Red"], 42]
+        for raw in values {
+            #expect(CanvasElementDrawing.parseColor(raw) == nil, "\(raw) parsed")
+        }
+    }
+
+    @Test("colorProblem accepts every supported form")
+    func colorProblemAcceptsValidColors() {
+        let values: [Any] = [
+            ["red": 1, "green": 0, "blue": 0, "alpha": 1], ["alpha": 1], ["white": 0.5],
+            ["hue": 0.5, "saturation": 1, "brightness": 1], ["hex": "#ABC", "alpha": 0.5] as [String: Any],
+            "#AABBCC", NSNull(), HSColor.hex("#AABBCC"),
+        ]
+        for raw in values {
+            let problem = CanvasElementDrawing.colorProblem(raw)
+            #expect(problem == nil, "\(raw): \(problem ?? "")")
+        }
+    }
+
+    @Test("colorProblem reports colors that won't draw as intended")
+    func colorProblemReportsInvalidColors() {
+        let values: [Any] = [
+            "#GGG", ["hex": "#12345"], ["Red": 1], ["red": "1"], ["image": "x"],
+            ["list": "No Such List", "name": "Red"], ["name": "Red"], 42,
+        ]
+        for raw in values {
+            #expect(CanvasElementDrawing.colorProblem(raw) != nil, "\(raw) wasn't reported")
+        }
+    }
+
+    @Test("gradientShading accepts a mix of color forms")
+    func gradientShadingMixedColorForms() {
+        let element: [String: Any] = [
+            "fillGradient": "linear",
+            "fillGradientColors": ["#FF0000", ["white": 1], HSColor.hex("#0000FF")] as [Any],
+        ]
+        let shading = CanvasElementDrawing.gradientShading(element, path: Path(CGRect(x: 0, y: 0, width: 10, height: 10)), containerSize: CGSize(width: 100, height: 100))
+        #expect(shading != nil)
     }
 
     // MARK: - Blend modes

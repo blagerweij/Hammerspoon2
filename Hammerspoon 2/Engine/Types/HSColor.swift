@@ -26,7 +26,7 @@ import Observation
     @objc static func rgb(_ r: Double, _ g: Double, _ b: Double, _ a: Double) -> HSColor
 
     /// Create a color from a hex string
-    /// - Parameter hex: Hex string (e.g. "#FF0000" or "FF0000")
+    /// - Parameter hex: Hex string (e.g. "#FF0000", "FF0000", "#F00", or "#FF000080" with alpha)
     /// - Returns: An HSColor object
     @objc static func hex(_ hex: String) -> HSColor
 
@@ -78,35 +78,44 @@ import Observation
     }
 
     @objc static func hex(_ hex: String) -> HSColor {
-        var hexSanitized = hex.trimmingCharacters(in: .whitespacesAndNewlines)
-        hexSanitized = hexSanitized.replacing("#", with: "")
-
-        var rgb: UInt64 = 0
-
-        guard unsafe Scanner(string: hexSanitized).scanHexInt64(&rgb) else {
+        guard let color = parseHex(hex) else {
             AKError("hs.ui: Invalid hex color: \(hex), using black")
             return Color.black.toBridge()
         }
+        return color.toBridge()
+    }
 
-        let length = hexSanitized.count
+    /// Parses a `#RGB`, `#RRGGBB` or `#RRGGBBAA` hex string (the `#` is optional), or returns
+    /// `nil` if it isn't one
+    static func parseHex(_ hex: String) -> Color? {
+        var hexSanitized = hex.trimmingCharacters(in: .whitespacesAndNewlines)
+        if hexSanitized.hasPrefix("#") {
+            hexSanitized.removeFirst()
+        }
+        guard hexSanitized.allSatisfy(\.isHexDigit) else { return nil }
+        if hexSanitized.count == 3 {
+            hexSanitized = String(hexSanitized.flatMap { [$0, $0] })
+        }
+
+        var rgb: UInt64 = 0
+        guard unsafe Scanner(string: hexSanitized).scanHexInt64(&rgb) else { return nil }
+
         let r, g, b, a: Double
-
-        if length == 6 {
+        switch hexSanitized.count {
+        case 6:
             r = Double((rgb & 0xFF0000) >> 16) / 255.0
             g = Double((rgb & 0x00FF00) >> 8) / 255.0
             b = Double(rgb & 0x0000FF) / 255.0
             a = 1.0
-        } else if length == 8 {
+        case 8:
             r = Double((rgb & 0xFF000000) >> 24) / 255.0
             g = Double((rgb & 0x00FF0000) >> 16) / 255.0
             b = Double((rgb & 0x0000FF00) >> 8) / 255.0
             a = Double(rgb & 0x000000FF) / 255.0
-        } else {
-            AKError("hs.ui: Invalid hex color length: \(hex), using black")
-            return Color.black.toBridge()
+        default:
+            return nil
         }
-
-        return Color(.sRGB, red: r, green: g, blue: b, opacity: a).toBridge()
+        return Color(.sRGB, red: r, green: g, blue: b, opacity: a)
     }
 
     @objc static func named(_ name: String) -> HSColor {

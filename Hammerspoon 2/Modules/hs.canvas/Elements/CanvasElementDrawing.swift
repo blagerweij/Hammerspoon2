@@ -480,16 +480,131 @@ enum CanvasElementDrawing {
         return (CGPoint(x: cx, y: cy), radius)
     }
 
-    /// Parses a v1-style color dictionary (`{red, green, blue, alpha}`, each 0.0-1.0,
-    /// missing components default to 0 except alpha which defaults to 1 -- matching
-    /// RoundedCorners.spoon's `fillColor={alpha=1}` meaning opaque black).
+    /// Parses a color in any of the forms canvas accepts, or returns `nil` if `raw` isn't one.
+    /// Called while drawing, so it never logs: `colorProblem(_:)` reports bad colors once, when
+    /// they're set. The forms are v1's `hs.drawing.color` tables plus the hex strings and
+    /// `HSColor` objects `hs.ui` takes:
+    /// - `{red, green, blue, alpha}`, each 0.0-1.0. Missing components default to 0 except alpha,
+    ///   which defaults to 1 -- matching RoundedCorners.spoon's `fillColor={alpha=1}` meaning
+    ///   opaque black
+    /// - `{hue, saturation, brightness, alpha}` and `{white, alpha}`, each 0.0-1.0
+    /// - `{hex, alpha}` and a bare hex string: `"#RGB"`, `"#RRGGBB"` or `"#RRGGBBAA"`
+    /// - `{list, name}`, a color from a system color list (see `NSColorList`)
+    /// - an `HSColor`
+    ///
+    /// The form is chosen by the first of `list`/`name`, `hex`, `white`, `hue`/`saturation`/
+    /// `brightness` present, in that order, as v1 did.
     static func parseColor(_ raw: Any?) -> Color? {
+        if let string = raw as? String { return HSColor.parseHex(string) }
+        if let hsColor = raw as? HSColor { return hsColor.color }
         guard let dict = raw as? [String: Any] else { return nil }
-        let r = (dict["red"] as? NSNumber)?.doubleValue ?? 0
-        let g = (dict["green"] as? NSNumber)?.doubleValue ?? 0
-        let b = (dict["blue"] as? NSNumber)?.doubleValue ?? 0
-        let a = (dict["alpha"] as? NSNumber)?.doubleValue ?? 1
-        return Color(.sRGB, red: r, green: g, blue: b, opacity: a)
+
+        let alpha = colorComponent(dict["alpha"]) ?? 1
+        if dict["list"] != nil || dict["name"] != nil {
+            guard let list = dict["list"] as? String, let name = dict["name"] as? String,
+                  let nsColor = NSColorList(named: list)?.color(withKey: name) else { return nil }
+            let color = Color(nsColor: nsColor)
+            return dict["alpha"] == nil ? color : color.opacity(alpha)
+        }
+        if let hex = dict["hex"] {
+            guard let hex = hex as? String, let color = HSColor.parseHex(hex) else { return nil }
+            return dict["alpha"] == nil ? color : color.opacity(alpha)
+        }
+        if dict["white"] != nil {
+            return Color(.sRGB, white: colorComponent(dict["white"]) ?? 0, opacity: alpha)
+        }
+        if dict["hue"] != nil || dict["saturation"] != nil || dict["brightness"] != nil {
+            return Color(nsColor: NSColor(colorSpace: .sRGB,
+                                          hue: colorComponent(dict["hue"]) ?? 0,
+                                          saturation: colorComponent(dict["saturation"]) ?? 0,
+                                          brightness: colorComponent(dict["brightness"]) ?? 0,
+                                          alpha: alpha))
+        }
+        return Color(.sRGB,
+                     red: colorComponent(dict["red"]) ?? 0,
+                     green: colorComponent(dict["green"]) ?? 0,
+                     blue: colorComponent(dict["blue"]) ?? 0,
+                     opacity: alpha)
+    }
+
+    private static func colorComponent(_ raw: Any?) -> CGFloat? {
+        (raw as? NSNumber).map { CGFloat($0.doubleValue) }
+    }
+
+    private static let colorKeys: Set<String> = [
+        "red", "green", "blue", "alpha", "hue", "saturation", "brightness", "white", "hex", "list", "name",
+    ]
+
+    /// Describes why `raw` won't draw as the color it was meant to be, or returns `nil` if it's
+    /// fine. A color dictionary with keys it doesn't recognise still draws (from the keys it
+    /// does), but those keys are reported, so a typo or an unsupported v1 form like `{image}`
+    /// doesn't silently turn into black.
+    static func colorProblem(_ raw: Any) -> String? {
+        if raw is NSNull || raw is HSColor { return nil }
+        if let string = raw as? String {
+            return HSColor.parseHex(string) == nil
+                ? "\"\(string)\" isn't a hex color (\"#RGB\", \"#RRGGBB\" or \"#RRGGBBAA\")"
+                : nil
+        }
+        guard let dict = raw as? [String: Any] else {
+            return "\(raw) isn't a color: use a color object such as {red, green, blue, alpha}, a hex string or an HSColor"
+        }
+        if dict["image"] != nil {
+            return "pattern image colors ({image}) aren't supported"
+        }
+        let unknown = dict.keys.filter { !colorKeys.contains($0) }.sorted()
+        if !unknown.isEmpty {
+            return "unrecognised color keys \(unknown.joined(separator: ", ")) (supported: \(colorKeys.sorted().joined(separator: ", ")))"
+        }
+        for (key, value) in dict where !["hex", "list", "name"].contains(key) && !(value is NSNumber) {
+            return "color component \(key) must be a number, not \(value)"
+        }
+        if dict["list"] != nil || dict["name"] != nil {
+            guard let list = dict["list"] as? String, let name = dict["name"] as? String else {
+                return "a color list color needs both list and name strings"
+            }
+            guard let colorList = NSColorList(named: list) else {
+                return "there's no color list named \"\(list)\" (available: \(NSColorList.availableColorLists.compactMap(\.name).joined(separator: ", ")))"
+            }
+            guard colorList.color(withKey: name) != nil else {
+                return "color list \"\(list)\" has no color named \"\(name)\""
+            }
+            return nil
+        }
+        if let hex = dict["hex"], (hex as? String).flatMap(HSColor.parseHex) == nil {
+            return "\(hex) isn't a hex color (\"#RGB\", \"#RRGGBB\" or \"#RRGGBBAA\")"
+        }
+        return nil
+    }
+
+    /// The element keys whose value is a color
+    private static let colorAttributes: Set<String> = ["fillColor", "strokeColor", "textColor"]
+
+    /// Logs a warning for each attribute of `element` that won't draw as intended. Called
+    /// whenever attributes are set, rather than while drawing, so each problem is logged once.
+    static func warnAboutInvalidAttributes(_ element: [String: Any], caller: String) {
+        for (key, value) in element {
+            warnAboutInvalidAttribute(key, value, caller: caller)
+        }
+    }
+
+    /// Logs a warning if an attribute's value won't draw as intended
+    static func warnAboutInvalidAttribute(_ key: String, _ value: Any, caller: String) {
+        if colorAttributes.contains(key) {
+            if let problem = colorProblem(value) {
+                AKWarning("hs.canvas: \(caller)(): \(key): \(problem)")
+            }
+        } else if key == "fillGradientColors" {
+            guard let colors = value as? [Any] else {
+                AKWarning("hs.canvas: \(caller)(): fillGradientColors must be an array of colors")
+                return
+            }
+            for (index, color) in colors.enumerated() {
+                if let problem = colorProblem(color) {
+                    AKWarning("hs.canvas: \(caller)(): fillGradientColors[\(index)]: \(problem)")
+                }
+            }
+        }
     }
 
     // MARK: - Text measurement
@@ -590,8 +705,8 @@ enum CanvasElementDrawing {
     /// a gradient (in which case the caller falls back to a plain `fillColor`).
     static func gradientShading(_ element: [String: Any], path: Path, containerSize: CGSize) -> GraphicsContext.Shading? {
         guard let kind = element["fillGradient"] as? String, kind == "linear" || kind == "radial" else { return nil }
-        guard let colorDicts = element["fillGradientColors"] as? [[String: Any]] else { return nil }
-        let colors = colorDicts.compactMap { parseColor($0) }
+        guard let colorValues = element["fillGradientColors"] as? [Any] else { return nil }
+        let colors = colorValues.compactMap { parseColor($0) }
         guard colors.count >= 2 else { return nil }
         let gradient = Gradient(colors: colors)
         let bounds = path.boundingRect

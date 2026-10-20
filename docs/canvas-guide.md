@@ -108,13 +108,33 @@ inner circle's *fill* is where you set `windingRule`, not the outer one's `build
 
 ### Colors
 
-Every color-valued property (`fillColor`, `strokeColor`, `textColor`, and the two gradient
-color lists below) takes a plain `{red, green, blue, alpha}` object, each component
-`0.0`–`1.0` — **not** the `HSColor` reactive type `hs.ui` uses elsewhere in Hammerspoon 2.
-Any component you omit defaults to `0`, **except `alpha`, which defaults to `1`** — so
-`{ alpha: 1 }` alone means *opaque black*, not "no color." This is an easy trap (it once
-produced a genuinely invisible test case during this module's own development), so it's
-worth committing to memory.
+Every color-valued property (`fillColor`, `strokeColor`, `textColor`, and each entry of
+`fillGradientColors` below) takes any of v1's `hs.drawing.color` forms, plus the hex strings
+and `HSColor` objects `hs.ui` takes:
+
+| Form | Example |
+|---|---|
+| `{red, green, blue, alpha}` | `{ red: 1, green: 0.5, alpha: 1 }` |
+| `{hue, saturation, brightness, alpha}` | `{ hue: 0.6, saturation: 1, brightness: 1 }` |
+| `{white, alpha}` | `{ white: 0.2, alpha: 0.8 }` |
+| `{hex, alpha}` | `{ hex: "#4A90E2", alpha: 0.5 }` |
+| a hex string: `"#RGB"`, `"#RRGGBB"` or `"#RRGGBBAA"` | `"#4A90E2"` |
+| `{list, name}`, a color from a system color list | `{ list: "Apple", name: "Orange" }` |
+| an `HSColor` | `HSColor.named("orange")` |
+
+Components are `0.0`–`1.0`. Any component you omit defaults to `0`, **except `alpha`, which
+defaults to `1`** — so `{ alpha: 1 }` alone means *opaque black*, not "no color." This is an
+easy trap (it once produced a genuinely invisible test case during this module's own
+development), so it's worth committing to memory.
+
+A color object is read by the first of `list`/`name`, `hex`, `white` and
+`hue`/`saturation`/`brightness` it contains, in that order, and otherwise as red/green/blue.
+A color that can't be used (an invalid hex string, an unknown color list, a misspelt key,
+or v1's unsupported `{image}` pattern form) logs a warning when it's set, and draws
+nothing (or black, for a misspelt key, from the keys that are recognised).
+
+An `HSColor` is read when the canvas draws, but changing it with `set()` doesn't redraw the
+canvas: set the attribute again to show the new color.
 
 ### Blend modes (`compositeRule`)
 

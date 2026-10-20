@@ -6,6 +6,7 @@
 import Testing
 import JavaScriptCore
 import AppKit
+import SwiftUI
 @testable import Hammerspoon_2
 
 @Suite("hs.canvas tests", .serialized)
@@ -489,6 +490,24 @@ struct HSCanvasTests {
             harness.expectEqual("before.y", 0)
             harness.expectEqual("after.x", 50)
             harness.expectEqual("after.y", 50)
+        }
+
+        @Test("An HSColor or hex string set from JS is stored so it draws as that color")
+        func colorFormsFromJS() throws {
+            let harness = makeHarness()
+            harness.eval("""
+                var c = hs.canvas.create({x: 0, y: 0, w: 100, h: 100})
+                c.appendElements([{ type: "rectangle", action: "fill", fillColor: HSColor.hex("#00FF00") }])
+                c.setElementAttribute(0, "strokeColor", "#0000FF")
+                """)
+            #expect(!harness.hasException)
+            let element = try #require(harness.evalValue("c.canvasElements()[0]")?.toDictionary() as? [String: Any])
+            let fillColor = try #require(CanvasElementDrawing.parseColor(element["fillColor"]))
+            let strokeColor = try #require(CanvasElementDrawing.parseColor(element["strokeColor"]))
+            let fill = try #require(NSColor(fillColor).usingColorSpace(.sRGB))
+            let stroke = try #require(NSColor(strokeColor).usingColorSpace(.sRGB))
+            #expect(fill.greenComponent == 1 && fill.redComponent == 0)
+            #expect(stroke.blueComponent == 1 && stroke.redComponent == 0)
         }
 
         @Test("minimumTextSize() returns a numeric size for a text element's font attributes")
