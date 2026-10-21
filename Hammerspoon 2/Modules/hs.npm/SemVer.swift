@@ -118,8 +118,18 @@ nonisolated struct SemVer: Comparable, Hashable, CustomStringConvertible, Sendab
 
     /// Expands one space-separated comparator set into bounds, or nil if any part of it isn't
     /// range syntax this understands.
+    private static let operators = [">=", "<=", ">", "<", "=", "^", "~"]
+
     private static func comparators(_ text: String) -> [Comparator]? {
-        var tokens = text.split(whereSeparator: \.isWhitespace).map(String.init)
+        // npm allows a space between an operator and its version (">= 1.2.3 < 2"): rejoin them.
+        var tokens: [String] = []
+        for token in text.split(whereSeparator: \.isWhitespace).map(String.init) {
+            if let last = tokens.last, operators.contains(last) {
+                tokens[tokens.count - 1] = last + token
+            } else {
+                tokens.append(token)
+            }
+        }
         var out: [Comparator] = []
         // Hyphen range: "1.2.3 - 2.3.4"
         if let i = tokens.firstIndex(of: "-"), i > 0, i + 1 < tokens.count {
@@ -129,7 +139,7 @@ nonisolated struct SemVer: Comparable, Hashable, CustomStringConvertible, Sendab
             tokens.removeSubrange((i - 1)...(i + 1))
         }
         for token in tokens {
-            let op = [">=", "<=", ">", "<", "=", "^", "~"].first { token.hasPrefix($0) } ?? ""
+            let op = operators.first { token.hasPrefix($0) } ?? ""
             let body = String(token.dropFirst(op.count)).trimmingCharacters(in: CharacterSet(charactersIn: "v"))
             guard let p = Partial(body) else { return nil }
             guard let major = p.major else { continue }   // "*" / "x" / "": anything
