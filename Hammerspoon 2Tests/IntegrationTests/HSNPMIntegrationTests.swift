@@ -143,6 +143,8 @@ struct HSNPMTests {
             ("1.5.0", "1.2.3 - 1.8.0", true), ("1.8.1", "1.2.3 - 1.8.0", false), ("1.8.9", "1.2.3 - 1.8", true),
             ("2.1.0", "*", true), ("2.1.0", "", true), ("1.2.3", "1.2.3", true), ("1.2.3", "=1.2.3", true), ("1.2.4", "1.2.3", false),
             ("1.0.0-beta.1", "^1.0.0", false), ("1.0.0-beta.1", "1.0.0-beta.1", true),
+            ("1.2.3", "^1.2.3-beta.1", true), ("1.9.0", "^1.2.3-beta.1", true), ("2.0.0", "^1.2.3-beta.1", false), ("1.2.2", "^1.2.3-beta.1", false),
+            ("2.0.0", "^1.2.3.4", false), ("2.0.0", "latest", false), ("2.0.0", "git+https://example.com/x.git", false),
         ])
         func testSatisfies(version: String, range: String, expected: Bool) throws {
             #expect(try #require(SemVer(version)).satisfies(range) == expected, "\(version) satisfies '\(range)'")

@@ -56,7 +56,9 @@ nonisolated struct SemVer: Comparable, Hashable, CustomStringConvertible, Sendab
         if let exact = SemVer(range) { return self == exact }
         guard prerelease.isEmpty else { return false }
         return range.components(separatedBy: "||").contains { alternative in
-            SemVer.comparators(alternative).allSatisfy { $0.matches(self) }
+            // Unsupported range text matches nothing, never everything.
+            guard let comparators = SemVer.comparators(alternative) else { return false }
+            return comparators.allSatisfy { $0.matches(self) }
         }
     }
 
@@ -77,26 +79,32 @@ nonisolated struct SemVer: Comparable, Hashable, CustomStringConvertible, Sendab
         }
     }
 
-    /// `1`, `1.2`, `1.x`, `*`: a version with trailing parts missing.
+    /// `1`, `1.2`, `1.x`, `*`, `1.2.3-beta.1`: a version with trailing parts missing.
     private struct Partial {
         let major: Int?
         let minor: Int?
         let patch: Int?
+        let prerelease: String
 
         init?(_ text: String) {
-            let parts = text.isEmpty ? [] : text.split(separator: ".", omittingEmptySubsequences: false).map(String.init)
-            guard parts.count <= 3 else { return nil }
-            func number(_ i: Int) -> Int? {
-                guard i < parts.count, !["x", "X", "*"].contains(parts[i]) else { return nil }
-                return Int(parts[i])
+            var text = Substring(text)
+            if let plus = text.firstIndex(of: "+") { text = text[..<plus] }
+            if let dash = text.firstIndex(of: "-") {
+                prerelease = String(text[text.index(after: dash)...])
+                text = text[..<dash]
+            } else {
+                prerelease = ""
             }
+            let parts = text.isEmpty ? [] : text.split(separator: ".", omittingEmptySubsequences: false).map(String.init)
+            // Every part must be a number or a wildcard; anything else ("latest", "garbage") isn't a version.
+            guard parts.count <= 3, parts.allSatisfy({ Int($0) != nil || ["x", "X", "*"].contains($0) }) else { return nil }
+            func number(_ i: Int) -> Int? { i < parts.count ? Int(parts[i]) : nil }
             major = number(0)
             minor = major == nil ? nil : number(1)
             patch = minor == nil ? nil : number(2)
-            if (0..<parts.count).contains(where: { number($0) == nil && Int(parts[$0]) != nil }) { return nil }
         }
 
-        var floor: SemVer { SemVer(major ?? 0, minor ?? 0, patch ?? 0) }
+        var floor: SemVer { SemVer(major ?? 0, minor ?? 0, patch ?? 0, prerelease: prerelease) }
         var isComplete: Bool { patch != nil }
 
         /// The first version above everything this partial covers (`1.2` → `1.3.0`), nil if complete.
@@ -108,22 +116,22 @@ nonisolated struct SemVer: Comparable, Hashable, CustomStringConvertible, Sendab
         }
     }
 
-    /// Expands one space-separated comparator set into bounds.
-    private static func comparators(_ text: String) -> [Comparator] {
+    /// Expands one space-separated comparator set into bounds, or nil if any part of it isn't
+    /// range syntax this understands.
+    private static func comparators(_ text: String) -> [Comparator]? {
         var tokens = text.split(whereSeparator: \.isWhitespace).map(String.init)
         var out: [Comparator] = []
         // Hyphen range: "1.2.3 - 2.3.4"
         if let i = tokens.firstIndex(of: "-"), i > 0, i + 1 < tokens.count {
-            out += comparators(">=" + tokens[i - 1])
-            if let hi = Partial(tokens[i + 1]) {
-                out.append(hi.next.map { Comparator(op: "<", version: $0) } ?? Comparator(op: "<=", version: hi.floor))
-            }
+            guard let lo = comparators(">=" + tokens[i - 1]), let hi = Partial(tokens[i + 1]) else { return nil }
+            out += lo
+            out.append(hi.next.map { Comparator(op: "<", version: $0) } ?? Comparator(op: "<=", version: hi.floor))
             tokens.removeSubrange((i - 1)...(i + 1))
         }
         for token in tokens {
             let op = [">=", "<=", ">", "<", "=", "^", "~"].first { token.hasPrefix($0) } ?? ""
             let body = String(token.dropFirst(op.count)).trimmingCharacters(in: CharacterSet(charactersIn: "v"))
-            guard let p = Partial(body) else { continue }
+            guard let p = Partial(body) else { return nil }
             guard let major = p.major else { continue }   // "*" / "x" / "": anything
             let lo = p.floor
             switch op {
