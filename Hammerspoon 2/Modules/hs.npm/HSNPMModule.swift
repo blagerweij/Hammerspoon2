@@ -14,7 +14,9 @@ import JavaScriptCore
 @objc protocol HSNPMModuleAPI: JSExport {
     /// Installs the `dependencies` listed in the `package.json` in your config directory, and
     /// theirs, into `node_modules` next to it, skipping any package already present in a
-    /// version that satisfies the requested range. Registries and credentials come from
+    /// version that satisfies the requested range. This also happens automatically before your
+    /// config is loaded whenever a `package.json` exists, so you only need to call it yourself
+    /// after editing `package.json` to pick up changes without a reload. Registries and credentials come from
     /// `.npmrc` in your config directory and in your home directory, so scoped packages
     /// (`@my-org/foo`) can come from a private registry such as GitHub Packages.
     /// - Returns: {Promise<string[]>} Resolves with every installed package as `name@version`,
