@@ -43,10 +43,16 @@ nonisolated final class NPMInstaller: Sendable {
         var installed: [String: String] = [:]
         while !queue.isEmpty {
             let (name, range) = queue.removeFirst()
-            if let have = installed[name] ?? installedVersion(of: name) {
+            if let have = installed[name] {
+                // Already handled in this install: a conflicting second request loses.
                 if !(SemVer(have)?.satisfies(range) ?? false) {
-                    await MainActor.run { AKWarning("hs.npm: \(name)@\(have) is installed but '\(range)' was requested; keeping \(have)") }
+                    await MainActor.run { AKWarning("hs.npm: \(name)@\(have) already chosen; ignoring conflicting request for '\(range)'") }
                 }
+                continue
+            }
+            // On disk from an earlier install: reuse it only while it still satisfies the request,
+            // so changing package.json from ^1 to ^2 replaces the installed 1.x.
+            if let have = installedVersion(of: name), SemVer(have)?.satisfies(range) ?? false {
                 installed[name] = have
                 continue
             }
