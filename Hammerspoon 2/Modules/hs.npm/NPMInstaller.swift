@@ -51,9 +51,12 @@ nonisolated final class NPMInstaller: Sendable {
                 continue
             }
             // On disk from an earlier install: reuse it only while it still satisfies the request,
-            // so changing package.json from ^1 to ^2 replaces the installed 1.x.
-            if let have = installedVersion(of: name), SemVer(have)?.satisfies(range) ?? false {
+            // so changing package.json from ^1 to ^2 replaces the installed 1.x. Its dependencies
+            // are queued too, so one that failed to download last time is retried.
+            if let manifest = installedManifest(of: name), let have = manifest["version"] as? String,
+               SemVer(have)?.satisfies(range) ?? false {
                 installed[name] = have
+                queue += NPMInstaller.dependencies(of: manifest)
                 continue
             }
             let manifest = try await resolve(name, range)
@@ -90,8 +93,8 @@ nonisolated final class NPMInstaller: Sendable {
 
     // MARK: - Private
 
-    private func installedVersion(of name: String) -> String? {
-        (try? NPMInstaller.readJSON(nodeModules.appendingPathComponent(name).appendingPathComponent("package.json")))?["version"] as? String
+    private func installedManifest(of name: String) -> [String: Any]? {
+        try? NPMInstaller.readJSON(nodeModules.appendingPathComponent(name).appendingPathComponent("package.json"))
     }
 
     private static func readJSON(_ url: URL) throws -> [String: Any] {
