@@ -29,10 +29,28 @@ nonisolated final class NPMInstaller: Sendable {
 
     var nodeModules: URL { projectDir.appendingPathComponent("node_modules") }
 
-    /// Installs every dependency, and their dependencies, that isn't already present in a
-    /// satisfying version. Returns every package now installed as `name@version`.
+    @MainActor private static var inFlight: [String: Task<[String], Error>] = [:]
+
+    /// Installs every dependency of `<projectDir>/package.json`, and their dependencies, that
+    /// isn't already present in a satisfying version. Returns every package now installed as
+    /// `name@version`. Installs are serialised per project directory: a second one (a reload
+    /// mid-download, or two `hs.npm.install()` calls) waits for the first to finish, so two
+    /// extractions never race on the same `node_modules`.
+    @MainActor
+    static func install(projectDir: URL) async throws -> [String] {
+        let key = projectDir.standardizedFileURL.path
+        let previous = inFlight[key]
+        let task = Task {
+            _ = await previous?.result   // whatever its outcome
+            return try await NPMInstaller(projectDir: projectDir).run()
+        }
+        inFlight[key] = task
+        defer { if inFlight[key] == task { inFlight[key] = nil } }
+        return try await task.value
+    }
+
     @concurrent
-    func install() async throws -> [String] {
+    private func run() async throws -> [String] {
         let packageJSON = projectDir.appendingPathComponent("package.json")
         guard let root = try? NPMInstaller.readJSON(packageJSON) else {
             throw NPMError("No readable package.json at \(packageJSON.path)")

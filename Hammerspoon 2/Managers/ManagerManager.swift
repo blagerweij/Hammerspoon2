@@ -98,7 +98,7 @@ class ManagerManager {
             let generation = bootGeneration
             Task { @MainActor in
                 do {
-                    let installed = try await NPMInstaller(projectDir: configDir).install()
+                    let installed = try await NPMInstaller.install(projectDir: configDir)
                     AKInfo("hs.npm: \(installed.count) package(s) ready: \(installed.joined(separator: ", "))")
                 } catch {
                     AKError("hs.npm: installing dependencies failed, loading config anyway: \(error.localizedDescription)")

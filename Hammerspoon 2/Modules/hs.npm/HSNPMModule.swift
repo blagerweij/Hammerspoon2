@@ -66,7 +66,7 @@ import JavaScriptCore
         return wrapAsyncInJSPromise(in: context) { holder in
             Task { @MainActor in
                 do {
-                    holder.resolveWith(try await NPMInstaller(projectDir: projectDir).install())
+                    holder.resolveWith(try await NPMInstaller.install(projectDir: projectDir))
                 } catch {
                     AKError("hs.npm.install(): \(error.localizedDescription)")
                     holder.rejectWith(error)
